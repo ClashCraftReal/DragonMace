@@ -3,7 +3,9 @@
 	"package": "com.lorenz.dragonmace.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"mixins": [
-		"ExampleMixin"
+		"RecipeManagerMixin",
+		"ResultSlotMixin",
+		"SlotMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

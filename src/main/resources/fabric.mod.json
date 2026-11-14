@@ -3,36 +3,28 @@
 	"id": "dragon-mace",
 	"version": "${version}",
 	"name": "Dragon Mace",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"description": "Adds a single, world-unique Dragon Mace crafted from a Heavy Core, a Dragon Egg, two Totems of Undying and a Breeze Rod. Server-side only; vanilla clients can join without it.",
 	"authors": [
-		"Me!"
+		"Cl4sh"
 	],
 	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
+		"homepage": "https://github.com/ClashCraftReal/DragonMace",
+		"sources": "https://github.com/ClashCraftReal/DragonMace"
 	},
 	"license": "CC0-1.0",
 	"icon": "assets/dragon-mace/icon.png",
-	"environment": "*",
+	"environment": "server",
 	"entrypoints": {
 		"main": [
 			"com.lorenz.dragonmace.DragonMace"
-		],
-		"client": [
-			"com.lorenz.dragonmace.client.DragonMaceClient"
 		]
 	},
 	"mixins": [
-		"dragon-mace.mixins.json",
-		{
-			"config": "dragon-mace.client.mixins.json",
-			"environment": "client"
-		}
+		"dragon-mace.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=0.20.1",
 		"minecraft": "~1.21.11",
-		"java": ">=21",
-		"fabric-api": "*"
+		"java": ">=21"
 	}
 }
