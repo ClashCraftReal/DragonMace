@@ -19,6 +19,9 @@ public class DragonMace implements ModInitializer {
 		// However, some things (like resources) may still be uninitialized.
 		// Proceed with mild caution.
 
+		// Loaded eagerly so the default file exists for operators to edit before the first respawn.
+		DragonMaceConfig.get();
+
 		LOGGER.info("Dragon Mace initialized (server-side only).");
 	}
 }

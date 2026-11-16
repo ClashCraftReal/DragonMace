@@ -3,9 +3,29 @@
 	"package": "com.lorenz.dragonmace.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"mixins": [
+		"BundleItemMixin",
+		"CommandsMixin",
+		"ContainerTransactionMixin",
+		"DispenserBlockEntityMixin",
+		"DragonEggBlockMixin",
+		"EntityMixin",
+		"FallingBlockEntityMixin",
+		"HopperBlockEntityMixin",
+		"InventoryMixin",
+		"ItemEntityMixin",
+		"ItemFrameMixin",
+		"ItemUseMixin",
+		"MinecraftServerMixin",
+		"MobPickupMixin",
+		"PlayerListMixin",
 		"RecipeManagerMixin",
+		"ResultSlotAccessor",
 		"ResultSlotMixin",
-		"SlotMixin"
+		"ServerPlayerDeathMixin",
+		"ServerPlayerRespawnMixin",
+		"ServerPlayerTabListMixin",
+		"SlotMixin",
+		"SlotSetMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
