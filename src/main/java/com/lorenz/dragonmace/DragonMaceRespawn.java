@@ -365,10 +365,12 @@ public final class DragonMaceRespawn {
 					DragonMace.LOGGER.info("A Dragon Mace was found in the world; saved state reconciled to PRESENT.");
 				}
 			}
-			case PRESENT_NOT_FOUND -> DragonMace.LOGGER.warn(
-					"The saved state says the Dragon Mace is PRESENT, but no mace is loaded. It may be in an "
-							+ "unloaded chunk or an offline player's inventory; use /recoverdragonmace near it, or "
-							+ "/deletedragonmace followed by /spawndragonmace to replace it.");
+			case PRESENT_NOT_FOUND -> {
+				// Deliberately silent. A PRESENT state with no loaded mace is the normal case for a mace
+				// sitting in an unloaded chunk or an offline player's inventory, so it is not an error and
+				// must not spam the console. The saved state is left untouched and the unique-mace
+				// protection is unaffected; only genuine failures are logged.
+			}
 			case NONE -> {
 			}
 		}

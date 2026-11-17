@@ -2,6 +2,7 @@ package com.lorenz.dragonmace;
 
 import java.util.UUID;
 
+import com.lorenz.dragonmace.world.DragonMaceOfflinePlayerData;
 import com.lorenz.dragonmace.world.DragonMaceWorldData;
 
 import net.minecraft.server.MinecraftServer;
@@ -31,6 +32,16 @@ public final class DragonMaceCurse {
 		NO_PLAYER
 	}
 
+	/** Outcome of an administrative removal, so every branch can be unit tested. */
+	public enum RemoveResult {
+		/** The target was the active holder and has been cleared. */
+		REMOVED,
+		/** The target is not the active holder, so nothing was changed. */
+		NOT_OWNER,
+		/** No target was supplied. */
+		NO_TARGET
+	}
+
 	private static final Object LOCK = new Object();
 
 	private DragonMaceCurse() {
@@ -54,9 +65,31 @@ public final class DragonMaceCurse {
 		return server == null ? null : DragonMaceWorldData.get(server).getCurseOwner();
 	}
 
-	public static boolean isActive(MinecraftServer server, UUID player) {
-		UUID owner = activeOwner(server);
+	/**
+	 * Pure join decision: the curse is only reapplied to the player recorded as its holder.
+	 *
+	 * <p>Once {@code /dm remove} clears the recorded holder, this is {@code false} for everyone, so a
+	 * removed player cannot regain the curse by reconnecting.
+	 */
+	public static boolean shouldApplyOnJoin(UUID owner, UUID player) {
 		return owner != null && owner.equals(player);
+	}
+
+	public static boolean isActive(MinecraftServer server, UUID player) {
+		return shouldApplyOnJoin(activeOwner(server), player);
+	}
+
+	/** Pure removal decision, kept separate so every branch can be unit tested. */
+	public static RemoveResult decideRemoval(UUID currentOwner, UUID target) {
+		if (target == null) {
+			return RemoveResult.NO_TARGET;
+		}
+
+		if (currentOwner == null || !currentOwner.equals(target)) {
+			return RemoveResult.NOT_OWNER;
+		}
+
+		return RemoveResult.REMOVED;
 	}
 
 	/**
@@ -90,8 +123,12 @@ public final class DragonMaceCurse {
 	/** Applies every curse effect to a player who already holds the curse. */
 	public static void apply(MinecraftServer server, ServerPlayer player) {
 		DragonMaceMaceConversion.convertInventory(player, server.registryAccess());
+		// The holder's maces carry the configured enchantments, immediately.
+		DragonMaceEnchantments.reconcileContainer(player.getInventory(), true, server.registryAccess(),
+				DragonMaceConfig.get());
 		DragonMaceAura.apply(player);
 		DragonMaceTabList.apply(server, player);
+		// Dragons Pride: the holder may carry at most two totems from the moment the curse lands.
 		DragonMaceTotemLimit.enforce(player);
 	}
 
@@ -100,13 +137,72 @@ public final class DragonMaceCurse {
 		DragonMaceAura.clear(player);
 		DragonMaceTabList.clear(server, player);
 		DragonMaceMaceConversion.revertInventory(player);
+		// Nobody outside the holder may keep enchanted maces, so every mace here is stripped.
+		DragonMaceEnchantments.reconcileContainer(player.getInventory(), false, server.registryAccess(),
+				DragonMaceConfig.get());
 	}
 
 	/**
-	 * Administrative removal.
+	 * Global removal: clears the curse for every player, online and offline.
 	 *
-	 * <p>An offline holder is cleared from the saved data only; the effects they still carry are
-	 * cleaned up by {@link #onPlayerJoin} the next time they log in.
+	 * <p>The recorded holder is cleared and saved first, so no join, respawn, transfer or tick handler
+	 * can reactivate the curse even if a later step fails. Every online player is then cleaned through
+	 * the normal {@link #clear} path, which removes the aura, rebroadcasts the tablist tag and reverts
+	 * the existing Draconic Mace. Finally every saved player file in {@code playerdata} is purged, so an
+	 * offline holder does not keep the aura until they log in.
+	 *
+	 * <p>No Very Heavy Core is created and no item is deleted. {@link #withdraw} remains the holder's
+	 * own voluntary trade and is untouched.
+	 */
+	public static GlobalRemoval removeAll(MinecraftServer server) {
+		if (server == null) {
+			return new GlobalRemoval(0, 0, 0, 0, 0);
+		}
+
+		synchronized (LOCK) {
+			DragonMaceWorldData data = DragonMaceWorldData.get(server);
+			data.setCurseOwner(null);
+			DragonMaceWorldData.save(server);
+
+			int online = 0;
+
+			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+				clear(server, player);
+				online++;
+			}
+
+			DragonMaceOfflinePlayerData.DirectoryPurge purge = DragonMaceOfflinePlayerData
+					.purgeDirectory(DragonMaceOfflinePlayerData.playerDataDirectory(server));
+
+			GlobalRemoval result = new GlobalRemoval(online, purge.purged(), purge.alreadyClean(),
+					purge.failed(), purge.skipped());
+
+			DragonMace.LOGGER.info(
+					"Global curse removal: {} online cleaned, {} files purged, {} already clean, {} failed, {} skipped.",
+					result.online(), result.purged(), result.alreadyClean(), result.failed(), result.skipped());
+			return result;
+		}
+	}
+
+	/** Counts reported by {@link #removeAll}. */
+	public record GlobalRemoval(int online, int purged, int alreadyClean, int failed, int skipped) {
+		/** Every player that was cleaned, whether online or from saved data. */
+		public int cleaned() {
+			return this.online + this.purged + this.alreadyClean;
+		}
+	}
+
+	/**
+	 * Administrative removal, for an online or an offline holder.
+	 *
+	 * <p>The recorded holder is cleared first, so the curse can never reactivate on the next join even
+	 * if the rest of the cleanup fails. An online holder then goes through the normal {@link #clear}
+	 * path: aura, tablist tag and the existing Draconic Mace revert. An offline holder has the aura
+	 * purged from their saved player data instead, because active effects live in that file; the file
+	 * is rewritten atomically and never created, so a player who never joined is not given saved data.
+	 *
+	 * <p>No Very Heavy Core is created here. That is the difference between this administrative
+	 * removal and {@link #withdraw}, which is the holder's own voluntary trade.
 	 */
 	public static boolean remove(MinecraftServer server, UUID target) {
 		if (server == null || target == null) {
@@ -116,7 +212,7 @@ public final class DragonMaceCurse {
 		synchronized (LOCK) {
 			DragonMaceWorldData data = DragonMaceWorldData.get(server);
 
-			if (!target.equals(data.getCurseOwner())) {
+			if (decideRemoval(data.getCurseOwner(), target) != RemoveResult.REMOVED) {
 				return false;
 			}
 
@@ -127,6 +223,10 @@ public final class DragonMaceCurse {
 
 			if (online != null) {
 				clear(server, online);
+			} else {
+				DragonMaceOfflinePlayerData.PurgeResult result =
+						DragonMaceOfflinePlayerData.purgeCurseOffline(server, target);
+				DragonMace.LOGGER.info("Offline curse removal for {}: {}.", target, result);
 			}
 
 			DragonMace.LOGGER.info("The Curse of the Dragons was removed from {}.", target);
@@ -227,6 +327,9 @@ public final class DragonMaceCurse {
 
 		DragonMaceAura.clearStale(player);
 		DragonMaceTabList.clear(server, player);
+		DragonMaceMaceConversion.revertInventory(player);
+		DragonMaceEnchantments.reconcileContainer(player.getInventory(), false, server.registryAccess(),
+				DragonMaceConfig.get());
 	}
 
 	/** Restores the curse on the new player object after a respawn. */
@@ -241,6 +344,9 @@ public final class DragonMaceCurse {
 		}
 
 		DragonMaceAura.clearStale(respawned);
+		DragonMaceMaceConversion.revertInventory(respawned);
+		DragonMaceEnchantments.reconcileContainer(respawned.getInventory(), false,
+				server.registryAccess(), DragonMaceConfig.get());
 	}
 
 	private static void giveCore(ServerPlayer player) {

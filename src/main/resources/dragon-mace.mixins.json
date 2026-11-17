@@ -4,8 +4,11 @@
 	"compatibilityLevel": "JAVA_21",
 	"mixins": [
 		"BundleItemMixin",
+		"BundleContentsMixin",
 		"CommandsMixin",
 		"ContainerTransactionMixin",
+		"BootstrapMixin",
+		"DamageSourceMixin",
 		"DispenserBlockEntityMixin",
 		"DragonEggBlockMixin",
 		"EntityMixin",
@@ -15,6 +18,7 @@
 		"ItemEntityMixin",
 		"ItemFrameMixin",
 		"ItemUseMixin",
+		"ListBackedContainerMixin",
 		"MinecraftServerMixin",
 		"MobPickupMixin",
 		"PlayerListMixin",
@@ -24,8 +28,12 @@
 		"ServerPlayerDeathMixin",
 		"ServerPlayerRespawnMixin",
 		"ServerPlayerTabListMixin",
+		"ShelfBlockEntityMixin",
 		"SlotMixin",
 		"SlotSetMixin"
+	],
+	"client": [
+		"client.MinecraftKeybindMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

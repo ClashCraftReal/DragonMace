@@ -9,13 +9,13 @@ import net.minecraft.server.Bootstrap;
  * <p>The mod registers no items, so bootstrapping the vanilla registries is all that is needed. It
  * runs once per test JVM because {@code Bootstrap.bootStrap()} is not idempotent.
  */
-final class TestBootstrap {
+public final class TestBootstrap {
 	private static boolean ready;
 
 	private TestBootstrap() {
 	}
 
-	static synchronized void boot() {
+	public static synchronized void boot() {
 		if (ready) {
 			return;
 		}

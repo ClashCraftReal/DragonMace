@@ -16,15 +16,18 @@ import net.minecraft.network.chat.Style;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Unit;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.Rarity;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.ItemLore;
+import net.minecraft.world.item.component.TooltipDisplay;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.item.enchantment.Enchantable;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
 
 /**
  * Builds the two new item identities of the Dragon effect update.
@@ -48,13 +51,19 @@ public final class DragonMaceItems {
 			Identifier.fromNamespaceAndPath("dragon_mace", "very_heavy_core");
 
 	/**
-	 * The vanilla Heavy Core model, applied through the synced {@code minecraft:item_model} component.
+	 * The vanilla Heavy Core item definition, applied through the synced {@code minecraft:item_model}
+	 * component.
 	 *
-	 * <p>This is what gives the paper item the Heavy Core appearance without shipping a client asset
-	 * and without a custom registry entry: the client resolves the vanilla model by id.
+	 * <p>The component takes an <em>item definition</em> id, not a block model id. The client resolves
+	 * it from {@code assets/<namespace>/items/<path>.json}, so the value must be
+	 * {@code minecraft:heavy_core}, which resolves to {@code assets/minecraft/items/heavy_core.json}.
+	 * That definition in turn points at {@code minecraft:block/heavy_core}, which is what actually
+	 * renders. Using {@code minecraft:block/heavy_core} here would look for
+	 * {@code assets/minecraft/items/block/heavy_core.json}, which does not exist, and the item would
+	 * fall back to the plain paper model.
 	 */
 	public static final Identifier VERY_HEAVY_CORE_MODEL =
-			Identifier.withDefaultNamespace("block/heavy_core");
+			Identifier.withDefaultNamespace("heavy_core");
 
 	/** Placeholder enchantment levels, replaced later by the dedicated enchantment system. */
 	public static final int DENSITY_LEVEL = 5;
@@ -95,9 +104,9 @@ public final class DragonMaceItems {
 		lines.add(Component.empty()
 				.append(styled("Dragons Aura:", ChatFormatting.GOLD))
 				.append(styled(" Gain permanent glowing and a dragon Aura.", ChatFormatting.DARK_AQUA)));
-		lines.add(Component.empty()
-				.append(styled("Dragons Pride: ", ChatFormatting.GOLD))
-				.append(styled("Totems stop working on you.", ChatFormatting.DARK_AQUA)));
+			lines.add(Component.empty()
+					.append(styled("Dragons Pride: ", ChatFormatting.GOLD))
+					.append(styled("You may carry and use up to two Totems of Undying.", ChatFormatting.DARK_AQUA)));
 		lines.add(styled("Curse transfers to killer on death.", ChatFormatting.DARK_AQUA));
 		lines.add(Component.empty());
 		lines.add(styled("\"Insanely heavy Singularity,", ChatFormatting.LIGHT_PURPLE));
@@ -111,26 +120,96 @@ public final class DragonMaceItems {
 		return List.copyOf(lines);
 	}
 
-	/** The lore of the Draconic Mace, in the same visual language as the core. */
-	public static List<Component> draconicMaceLore() {
-		List<Component> lines = new ArrayList<>(11);
+	/** The five gold stars of the Draconic Mace name. */
+	public static final String DRACONIC_STARS = "\u272A\u272A\u272A\u272A\u272A";
+	/** The red circled five that closes the Draconic Mace name. */
+	public static final String DRACONIC_TIER = "\u278E";
+	/** The rune glyph that opens the Draconic Rune lore line. */
+	public static final String DRACONIC_RUNE_GLYPH = "\u25C6";
 
-		lines.add(styled("Curse of the Dragons (\u221E):", ChatFormatting.GOLD));
+	/**
+	 * The exact Draconic Mace name, reproduced from the design command.
+	 *
+	 * <p>Four runs: the light purple name, a plain space, five gold stars and the red tier glyph. Every
+	 * run is explicitly non-italic, because vanilla italicises a custom name by default.
+	 */
+	public static Component draconicMaceName() {
+		return Component.empty()
+				.append(styled("Draconic Mace", ChatFormatting.LIGHT_PURPLE))
+				.append(Component.literal(" ").withStyle(Style.EMPTY.withItalic(false)))
+				.append(styled(DRACONIC_STARS, ChatFormatting.GOLD))
+				.append(styled(DRACONIC_TIER, ChatFormatting.RED));
+	}
+
+	private static MutableComponent obfuscated(String text, ChatFormatting color) {
+		return Component.literal(text)
+				.withStyle(Style.EMPTY.withColor(color).withBold(true).withItalic(false).withObfuscated(true));
+	}
+
+	/**
+	 * The exact Draconic Mace lore, reproduced line for line from the design command.
+	 *
+	 * <p>Five content sections separated by blank lines: the gear score, the enchantment summary, the
+	 * Draconic Rune line, Soulbound and the Mythic Mace footer. Colours, bold runs, the obfuscated
+	 * {@code X} characters and the trailing spaces are intentional and must not be normalised.
+	 */
+	public static List<Component> draconicMaceLore() {
+		List<Component> lines = new ArrayList<>(19);
+
 		lines.add(Component.empty()
-				.append(styled("Dragons Wrath:", ChatFormatting.GOLD))
-				.append(styled(" This mace answers only to the cursed.", ChatFormatting.DARK_AQUA)));
+				.append(styled("Gear Score: ", ChatFormatting.GRAY))
+				.append(styled("9999 ", ChatFormatting.LIGHT_PURPLE))
+				.append(styled("(9999)", ChatFormatting.DARK_AQUA)));
+		lines.add(Component.empty());
+		lines.add(bold("Wind Burst III, Density V", ChatFormatting.GOLD));
 		lines.add(Component.empty());
 		lines.add(Component.empty()
-				.append(styled("Smash:", ChatFormatting.GOLD))
-				.append(styled(" Slam the ground to launch nearby foes.", ChatFormatting.DARK_AQUA)));
+				.append(styled("Ability: Enchant Chooser", ChatFormatting.GOLD))
+				.append(Component.literal(" ").withStyle(Style.EMPTY.withItalic(false)))
+				.append(bold("SNEAK OFFHAND", ChatFormatting.GREEN)));
+		lines.add(styled("Allows the user to enchant their mace at will,", ChatFormatting.GRAY));
+		lines.add(styled("using dragon powers.", ChatFormatting.GRAY));
+		lines.add(styled("Opens a GUI to choose enchantments and runes.", ChatFormatting.GRAY));
+		lines.add(Component.empty()
+				.append(styled("Cooldown:", ChatFormatting.DARK_GRAY))
+				.append(Component.literal(" ").withStyle(Style.EMPTY.withItalic(false)))
+				.append(styled("120s", ChatFormatting.YELLOW)));
 		lines.add(Component.empty());
-		lines.add(styled("\"Insanely heavy Singularity,", ChatFormatting.LIGHT_PURPLE));
-		lines.add(styled("forged with ancient mass and the remains of a dragon. ", ChatFormatting.LIGHT_PURPLE));
-		lines.add(styled("From it's shadow, this weapon arises.\"", ChatFormatting.LIGHT_PURPLE));
+		lines.add(Component.empty()
+				.append(styled("Ability: Smash ", ChatFormatting.GOLD))
+				.append(bold("LEFT CLICK", ChatFormatting.GREEN)));
+		lines.add(Component.empty()
+				.append(styled("While falling over ", ChatFormatting.GRAY))
+				.append(styled("1.5 blocks", ChatFormatting.GOLD))
+				.append(styled(", activate a smash attack.", ChatFormatting.GRAY)));
+		lines.add(Component.empty()
+				.append(styled("Deals more ", ChatFormatting.GRAY))
+				.append(styled("damage", ChatFormatting.RED))
+				.append(styled(" the higher the fall.", ChatFormatting.GRAY)));
 		lines.add(Component.empty());
-		lines.add(bold("DRACONIC MACE", ChatFormatting.GOLD));
+		lines.add(styled(DRACONIC_RUNE_GLYPH + " Draconic Rune III", ChatFormatting.WHITE));
+		lines.add(Component.empty());
+		lines.add(styled("*Converted by Curse of the Dragons*", ChatFormatting.DARK_GRAY));
+		lines.add(styled("*Soulbound*", ChatFormatting.DARK_GRAY));
+		lines.add(Component.empty()
+				.append(obfuscated("X", ChatFormatting.LIGHT_PURPLE))
+				.append(bold(" Mythic Mace ", ChatFormatting.LIGHT_PURPLE))
+				.append(obfuscated("X", ChatFormatting.LIGHT_PURPLE)));
 
 		return List.copyOf(lines);
+	}
+
+	/**
+	 * The hidden tooltip components of the Draconic Mace.
+	 *
+	 * <p>Attribute modifiers, enchantments and unbreakable are hidden so the custom lore is the only
+	 * place the enchantments are shown, exactly as the design command specifies.
+	 */
+	public static TooltipDisplay draconicTooltipDisplay() {
+		return TooltipDisplay.DEFAULT
+				.withHidden(DataComponents.ATTRIBUTE_MODIFIERS, true)
+				.withHidden(DataComponents.ENCHANTMENTS, true)
+				.withHidden(DataComponents.UNBREAKABLE, true);
 	}
 
 	/**
@@ -172,53 +251,50 @@ public final class DragonMaceItems {
 	 * Converts a mace into the Draconic Mace.
 	 *
 	 * <p>Every existing component is copied first, so damage, a pre-existing Dragon Mace marker and any
-	 * enchantments the player already had are preserved. The placeholder enchantments are only applied
-	 * when the mace carries none, and that decision is recorded so a withdrawal can remove exactly what
-	 * was added.
+	 * enchantments the player already had are preserved. The design components are then written on top:
+	 * the exact name and lore, the forced glint, unbreakable and the hidden tooltip components, plus the
+	 * real Density V and Wind Burst III enchantments.
 	 */
 	public static ItemStack createDraconicMaceStack(ItemStack source, RegistryAccess registries) {
 		ItemStack stack = source == null || source.isEmpty() ? new ItemStack(Items.MACE) : source.copy();
 
 		CompoundTag tag = DragonMaceIdentity.copyTag(stack);
 		tag.putBoolean(DragonMaceIdentity.DRACONIC_KEY, true);
+		tag.remove(DragonMaceIdentity.REVERTED_KEY);
 		tag.putInt(DragonMaceIdentity.DRACONIC_RUNE_KEY, DRACONIC_RUNE_LEVEL);
 		stack.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
-		stack.set(DataComponents.CUSTOM_NAME,
-				styled(DragonMaceRecipes.DRAGON_MACE_NAME, ChatFormatting.DARK_PURPLE));
+		// The canonical name is always restored, whatever the player renamed the reverted mace to.
+		stack.set(DataComponents.CUSTOM_NAME, draconicMaceName());
 		stack.set(DataComponents.LORE, new ItemLore(draconicMaceLore()));
-		stack.set(DataComponents.RARITY, Rarity.EPIC);
+		stack.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
+		stack.set(DataComponents.UNBREAKABLE, Unit.INSTANCE);
+		stack.set(DataComponents.TOOLTIP_DISPLAY, draconicTooltipDisplay());
+		stack.set(DataComponents.ENCHANTABLE, new Enchantable(1));
+		// updateEnchantments returns early when the component is absent, so seed it first.
+		stack.set(DataComponents.ENCHANTMENTS, ItemEnchantments.EMPTY);
 
 		applyPlaceholderEnchantments(stack, registries);
 		return stack;
 	}
 
 	/**
-	 * Applies the temporary Draconic Mace enchantments.
+	 * Applies the Draconic Mace enchantments.
 	 *
-	 * <p>Density V and Wind Burst III are real vanilla enchantments. Draconic Rune has no vanilla
-	 * equivalent, so its level is stored in custom data under
-	 * {@link DragonMaceIdentity#DRACONIC_RUNE_KEY} for the future enchantment system to read. A mace
-	 * that already has enchantments is left alone so a player's own enchantments are never overwritten.
+	 * <p>Density V and Wind Burst III are real vanilla enchantments and are always written, so the
+	 * design is identical on every mace. Draconic Rune has no vanilla equivalent, so its level is stored
+	 * in custom data under {@link DragonMaceIdentity#DRACONIC_RUNE_KEY} for the future enchantment
+	 * system to read; it stays presentation-only and is never registered as an enchantment.
 	 *
-	 * @return {@code true} when the placeholder enchantments were written by this call
+	 * @return {@code true} when the enchantments were written by this call
 	 */
 	public static boolean applyPlaceholderEnchantments(ItemStack stack, RegistryAccess registries) {
 		if (stack == null || stack.isEmpty() || registries == null) {
 			return false;
 		}
 
-		if (EnchantmentHelper.hasAnyEnchantments(stack)) {
-			return false;
-		}
-
-		HolderLookup.RegistryLookup<Enchantment> registry = registries.lookupOrThrow(Registries.ENCHANTMENT);
-		Holder.Reference<Enchantment> density = registry.getOrThrow(Enchantments.DENSITY);
-		Holder.Reference<Enchantment> windBurst = registry.getOrThrow(Enchantments.WIND_BURST);
-
-		EnchantmentHelper.updateEnchantments(stack, enchantments -> {
-			enchantments.set(density, DENSITY_LEVEL);
-			enchantments.set(windBurst, WIND_BURST_LEVEL);
-		});
+		// The global configuration decides the enchantments, so a Draconic Mace always matches it.
+		stack.set(DataComponents.ENCHANTMENTS,
+				DragonMaceEnchantments.configured(registries, DragonMaceConfig.get()));
 
 		CompoundTag tag = DragonMaceIdentity.copyTag(stack);
 		tag.putBoolean(DragonMaceIdentity.PLACEHOLDER_ENCHANTMENTS_KEY, true);
@@ -228,33 +304,50 @@ public final class DragonMaceItems {
 	}
 
 	/**
-	 * Reverts a Draconic Mace to the mace it was before the conversion.
+	 * Reverts a Draconic Mace to a plain mace that keeps only its custom name.
 	 *
-	 * <p>Only the components this update added are removed, so the stack itself is never destroyed and
-	 * a pre-existing Dragon Mace marker keeps the unique mace intact.
+	 * <p>Every Draconic property is stripped: lore, enchantments, the glint override, unbreakable, the
+	 * tooltip display, the item model and the custom data marker. {@code ENCHANTABLE} is removed too,
+	 * which is what makes {@code ItemStack.isEnchantable()} false and therefore blocks the enchanting
+	 * table server-side rather than only in the client UI.
+	 *
+	 * <p>The stack itself is never destroyed and its damage is preserved. The custom name is kept
+	 * exactly as it was, so the item still reads as a Draconic Mace while carrying none of its power.
+	 * The unique Stage 1 Dragon Mace keeps its own name, because its marker is not Draconic-specific.
 	 */
 	public static ItemStack revertDraconicMace(ItemStack source) {
 		ItemStack stack = source.copy();
 		CompoundTag tag = DragonMaceIdentity.copyTag(stack);
-		boolean placeholder = tag.getBooleanOr(DragonMaceIdentity.PLACEHOLDER_ENCHANTMENTS_KEY, false);
 
 		tag.remove(DragonMaceIdentity.DRACONIC_KEY);
 		tag.remove(DragonMaceIdentity.PLACEHOLDER_ENCHANTMENTS_KEY);
 		tag.remove(DragonMaceIdentity.DRACONIC_RUNE_KEY);
+		// Kept so the anvil guard still recognises the item after a rename replaces its name.
+		tag.putBoolean(DragonMaceIdentity.REVERTED_KEY, true);
+		stack.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
 
-		if (tag.isEmpty()) {
-			stack.remove(DataComponents.CUSTOM_DATA);
-		} else {
-			stack.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
-		}
-
-		if (placeholder) {
-			stack.remove(DataComponents.ENCHANTMENTS);
-		}
-
+		stack.remove(DataComponents.ENCHANTMENTS);
+		stack.remove(DataComponents.STORED_ENCHANTMENTS);
+		stack.remove(DataComponents.ENCHANTABLE);
+		stack.remove(DataComponents.ENCHANTMENT_GLINT_OVERRIDE);
+		stack.remove(DataComponents.UNBREAKABLE);
+		stack.remove(DataComponents.TOOLTIP_DISPLAY);
 		stack.remove(DataComponents.RARITY);
 		stack.remove(DataComponents.LORE);
 
+		// Restore the item's own default model instead of deleting the component. The mace prototype
+		// carries minecraft:item_model=minecraft:mace, and a stack without it has no model to resolve,
+		// which is what made a dropped mace render invisible.
+		Identifier defaultModel = Items.MACE.components().get(DataComponents.ITEM_MODEL);
+
+		if (defaultModel == null) {
+			stack.remove(DataComponents.ITEM_MODEL);
+		} else {
+			stack.set(DataComponents.ITEM_MODEL, defaultModel);
+		}
+
+		// A reverted mace is an ordinary mace again, so it carries no custom name at all. The unique
+		// Stage 1 Dragon Mace is a different item and keeps its own canonical name.
 		if (DragonMaceIdentity.isDragonMace(stack)) {
 			stack.set(DataComponents.CUSTOM_NAME,
 					styled(DragonMaceRecipes.DRAGON_MACE_NAME, ChatFormatting.DARK_PURPLE));
@@ -263,6 +356,30 @@ public final class DragonMaceItems {
 		}
 
 		return stack;
+	}
+
+	/**
+	 * True when {@code result} carries an enchantment level above what {@code input} already had.
+	 *
+	 * <p>This is the anvil guard's decision, kept here so it can be tested without a live menu. A pure
+	 * rename leaves every level unchanged and is therefore allowed; adding a book, merging with another
+	 * enchanted mace or any other merge that raises a level is refused.
+	 */
+	public static boolean addsEnchantments(ItemStack input, ItemStack result) {
+		if (input == null || result == null || result.isEmpty()) {
+			return false;
+		}
+
+		ItemEnchantments before = input.getEnchantments();
+		ItemEnchantments after = result.getEnchantments();
+
+		for (Holder<Enchantment> enchantment : after.keySet()) {
+			if (after.getLevel(enchantment) > before.getLevel(enchantment)) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**

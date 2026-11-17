@@ -77,8 +77,10 @@ class DragonMaceGiveItemCommandTest {
 
 	@Test
 	void dmHasExactlyTheFiveSubcommands() {
-		assertEquals(5, dm.getChildren().size(),
-				"the tree must contain only effect, remove, giveitem, withdraw and status");
+		assertEquals(6, dm.getChildren().size(),
+				"the tree must contain only effect, remove, giveitem, withdraw, status and changeenchants");
+		assertNotNull(dm.getChild("changeenchants"), "/dm changeenchants must exist");
+		assertNull(dm.getChild("enchantments"), "/dm enchantments must be gone");
 	}
 
 	@Test
@@ -104,7 +106,7 @@ class DragonMaceGiveItemCommandTest {
 		assertEquals(1, stack.getCount());
 		assertTrue(DragonMaceIdentity.isVeryHeavyCore(stack));
 		assertEquals("Very Heavy Core", stack.getHoverName().getString());
-		assertEquals(Identifier.withDefaultNamespace("block/heavy_core"),
+		assertEquals(Identifier.withDefaultNamespace("heavy_core"),
 				stack.get(DataComponents.ITEM_MODEL));
 	}
 }

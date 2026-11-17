@@ -63,8 +63,12 @@ public final class DragonMaceRecipes {
 	}
 
 	/**
-	 * Drops the vanilla mace recipe and any pre-existing Dragon Mace or Very Heavy Core recipe, then
-	 * adds both mod recipes. Every other recipe is preserved.
+	 * Adds both mod recipes and keeps every vanilla recipe, including the vanilla mace recipe.
+	 *
+	 * <p>The vanilla mace recipe is deliberately preserved: maces must stay craftable, and the unique
+	 * Dragon Mace protection lives in the item identity and ownership systems rather than in the recipe
+	 * map. Only the mod's own two recipes are replaced, so a datapack reload cannot leave a stale copy
+	 * behind. Every other recipe is preserved untouched.
 	 *
 	 * <p>This runs on every recipe-map rebuild, which happens on server start and on every datapack
 	 * reload, so both recipes survive restarts without any extra persistence.
@@ -75,8 +79,7 @@ public final class DragonMaceRecipes {
 		for (RecipeHolder<?> holder : recipes.values()) {
 			Identifier id = holder.id().identifier();
 
-			if (id.equals(VANILLA_MACE_RECIPE) || id.equals(DRAGON_MACE_RECIPE)
-					|| id.equals(VERY_HEAVY_CORE_RECIPE)) {
+			if (id.equals(DRAGON_MACE_RECIPE) || id.equals(VERY_HEAVY_CORE_RECIPE)) {
 				continue;
 			}
 

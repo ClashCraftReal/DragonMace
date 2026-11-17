@@ -5,6 +5,8 @@ import java.util.List;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.CraftingContainer;
+import net.minecraft.world.inventory.ResultContainer;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 
@@ -21,20 +23,30 @@ public final class DragonMaceProtection {
 	/**
 	 * True when the stack is a special item that must never enter a container.
 	 *
-	 * <p>The Dragon Mace and the Dragon Egg share the same storage rules. Both are identified by their
-	 * persistent item identity, never by a display name, so a renamed stack is still protected.
+	 * <p>The Dragon Mace, the Dragon Egg and the Very Heavy Core share the same storage rules. All three
+	 * are identified by their persistent item identity, never by a display name or a base item type, so a
+	 * renamed stack is still protected and ordinary paper is never mistaken for a core.
 	 */
 	public static boolean isProtectedStack(ItemStack stack) {
-		return DragonMaceIdentity.isDragonMace(stack) || DragonMaceIdentity.isDragonEgg(stack);
+		return DragonMaceIdentity.isDragonMace(stack) || DragonMaceIdentity.isDragonEgg(stack)
+				|| DragonMaceIdentity.isVeryHeavyCore(stack);
 	}
 
 	/**
-	 * Only a player inventory is an allowed home. Chests, barrels, shulkers, hoppers, dispensers,
-	 * droppers and ender chests are all {@code Container} implementations that are not
-	 * {@link Inventory}, so they are refused by the same check.
+	 * Only a player inventory or a crafting grid is an allowed home. Chests, barrels, shulkers, hoppers,
+	 * dispensers, droppers and ender chests are all {@code Container} implementations that are neither,
+	 * so they are refused by the same check.
+	 *
+	 * <p>Crafting grids are allowed because the Dragon Egg is a real ingredient of the Very Heavy Core
+	 * recipe. A crafting grid is backed by a {@code TransientCraftingContainer}, which implements
+	 * {@link CraftingContainer} but not {@link Inventory}, so refusing every non-inventory container
+	 * also refused the egg in the crafting grid and made the recipe uncraftable. Allowing
+	 * {@code CraftingContainer} covers both the 2x2 inventory grid and the 3x3 crafting table grid
+	 * without opening up any storage block.
 	 */
 	public static boolean isAllowedContainer(Container container) {
-		return container instanceof Inventory;
+		return container instanceof Inventory || container instanceof CraftingContainer
+				|| container instanceof ResultContainer;
 	}
 
 	/** True when writing {@code stack} into {@code container} must be refused. */
@@ -81,6 +93,32 @@ public final class DragonMaceProtection {
 	}
 
 	/**
+	 * True when a shelf must refuse {@code stack}.
+	 *
+	 * <p>A shelf is storage, so it follows the same rule as a chest. It is checked separately because
+	 * a shelf is filled by {@code ShelfBlockEntity.swapItemNoUpdate} and never by a menu slot, so the
+	 * slot-level guards never see it.
+	 */
+	public static boolean blocksShelfInsert(ItemStack stack) {
+		return isProtectedStack(stack);
+	}
+
+	/**
+	 * True when a number-key or offhand swap would write a protected stack into {@code slot}.
+	 *
+	 * <p>{@code button} is the hotbar index {@code 0-8} or {@link Inventory#SLOT_OFFHAND} for the
+	 * offhand swap. Vanilla clears the source inventory slot before it writes the destination, so this
+	 * decision has to be made before the click runs; the mixin cancels the whole click on {@code true}.
+	 */
+	public static boolean blocksSwapInto(Slot slot, int button, ItemStack swappedIn) {
+		if (button < 0 || (button >= Inventory.SELECTION_SIZE && button != Inventory.SLOT_OFFHAND)) {
+			return false;
+		}
+
+		return blocksSlotStorage(slot, swappedIn);
+	}
+
+	/**
 	 * The permanent ground protections that apply to a dropped Dragon Mace.
 	 *
 	 * <p>Kept as a pure value so the protection decision can be tested without constructing a live
@@ -91,8 +129,24 @@ public final class DragonMaceProtection {
 
 	/** Pure protection decision for a stack that is about to become an item entity. */
 	public static GroundProtection groundProtection(ItemStack stack) {
-		boolean protectedStack = isProtectedStack(stack);
+		// The mace, the egg and the Very Heavy Core are all permanent ground items: they never despawn
+		// and never burn. The core is matched by its custom identity, so ordinary paper keeps vanilla
+		// behaviour. Void destruction is not damage-based, so it still applies to all three.
+		boolean protectedStack = DragonMaceIdentity.isDragonMace(stack) || DragonMaceIdentity.isDragonEgg(stack)
+				|| DragonMaceIdentity.isVeryHeavyCore(stack);
 		return new GroundProtection(protectedStack, protectedStack);
+	}
+
+	/**
+	 * True when a dropped stack must be immune to fire and lava.
+	 *
+	 * <p>Separate from {@link #groundProtection} because it is also consulted by
+	 * {@code ItemEntity.fireImmune()}, which is the gate {@code lavaHurt} uses before it applies damage
+	 * and sets the entity alight. Invulnerability already blocks the damage, but the entity would still
+	 * catch fire and play the lava hurt sound without this.
+	 */
+	public static boolean isFireImmune(ItemStack stack) {
+		return groundProtection(stack).invulnerable();
 	}
 
 	/**

@@ -2,6 +2,7 @@ package com.lorenz.dragonmace;
 
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.CustomData;
@@ -34,6 +35,15 @@ public final class DragonMaceIdentity {
 	/** Key holding the custom identifier string {@code dragon_mace:very_heavy_core}. */
 	public static final String VERY_HEAVY_CORE_ID_KEY = "very_heavy_core_id";
 
+	/**
+	 * Key marking a mace that was reverted out of the Draconic form.
+	 *
+	 * <p>This is the one marker a reverted mace keeps. It is not a Draconic property: it records that
+	 * the item must stay unenchantable, and it has to survive an anvil rename, which replaces the custom
+	 * name and would otherwise make the item indistinguishable from an ordinary mace.
+	 */
+	public static final String REVERTED_KEY = "draconic_reverted";
+
 	private DragonMaceIdentity() {
 	}
 
@@ -54,6 +64,23 @@ public final class DragonMaceIdentity {
 
 		CustomData data = stack.get(DataComponents.CUSTOM_DATA);
 		return data != null && data.copyTag().getBooleanOr(DRACONIC_KEY, false);
+	}
+
+	/**
+	 * True when the stack is a mace that was reverted out of the Draconic form.
+	 *
+	 * <p>Identified by the {@link #REVERTED_KEY} marker alone, never by its name: a reverted mace has no
+	 * custom name at all, and a player may rename it in an anvil. The marker is the only Draconic-specific
+	 * data a reverted mace keeps, and it is what lets the unique Draconic Mace be recognised again when
+	 * it returns to the curse holder.
+	 */
+	public static boolean isRevertedDraconicMace(ItemStack stack) {
+		if (stack.isEmpty() || !stack.is(Items.MACE) || isDraconicMace(stack)) {
+			return false;
+		}
+
+		CustomData data = stack.get(DataComponents.CUSTOM_DATA);
+		return data != null && data.copyTag().getBooleanOr(REVERTED_KEY, false);
 	}
 
 	/**

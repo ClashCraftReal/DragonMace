@@ -1,5 +1,8 @@
 package com.lorenz.dragonmace;
 
+import java.util.UUID;
+
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
@@ -76,57 +79,165 @@ public final class DragonMaceTotemLimit {
 	}
 
 	/**
-	 * Drops every totem above the limit.
+	 * True when inserting {@code incoming} into {@code inventory} would break Dragons Pride.
 	 *
-	 * <p>Totems are removed from the end of the inventory first, so the hotbar and the offhand keep
-	 * their totems and the player loses the least convenient ones.
+	 * <p>Used by the click and shift-click guards to refuse the transfer <em>before</em> anything is
+	 * moved, so a rejected transfer leaves the source stack exactly where it was. Nothing is ever
+	 * dropped or destroyed to satisfy the limit.
+	 */
+	public static boolean blocksInsert(Inventory inventory, ItemStack incoming) {
+		return !allowsAdd(inventory, incoming);
+	}
+
+	/**
+	 * Curse-aware insertion decision.
 	 *
-	 * @return the number of totems dropped
+	 * <p>Dragons Pride only exists for the current curse holder, so a player without the curse is never
+	 * refused. This is the single decision the click guard consults, which keeps the gate and the
+	 * counting rule in one place instead of duplicating the owner check in a mixin.
+	 */
+	public static boolean blocksInsert(UUID owner, UUID player, int carried, ItemStack incoming) {
+		if (!appliesTo(owner, player)) {
+			return false;
+		}
+
+		return !allowsAdd(carried, incoming);
+	}
+
+	/**
+	 * True when a shift-click of {@code stack} into {@code inventory} would break Dragons Pride.
+	 *
+	 * <p>The source stack is skipped by identity, so a shift-click that starts inside the player
+	 * inventory is an internal move and is never refused.
+	 */
+	public static boolean blocksQuickMove(Inventory inventory, ItemStack stack) {
+		if (inventory == null || !isTotem(stack)) {
+			return false;
+		}
+
+		int carried = 0;
+
+		for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+			ItemStack existing = inventory.getItem(slot);
+
+			if (existing == stack) {
+				continue;
+			}
+
+			if (isTotem(existing)) {
+				carried += existing.getCount();
+			}
+		}
+
+		return !allowsAdd(carried, stack);
+	}
+
+	/**
+	 * Plans which totems must be dropped, honouring the priority order.
+	 *
+	 * <p>The offhand totem is always kept. The remaining budget is then spent on the inventory slots in
+	 * ascending order, so the lowest slot keeps its totem and every later slot drops its excess. Pure,
+	 * so the whole priority table can be tested without a live player.
+	 *
+	 * @param offhandCount    totems in the offhand slot
+	 * @param inventoryCounts totem counts for the main inventory and hotbar, in slot order
+	 * @return the number of totems to drop from each inventory slot, in the same order
+	 */
+	public static int[] planDrops(int offhandCount, int[] inventoryCounts) {
+		int[] drops = new int[inventoryCounts.length];
+		int budget = MAX_TOTEMS - Math.min(Math.max(offhandCount, 0), MAX_TOTEMS);
+
+		for (int index = 0; index < inventoryCounts.length; index++) {
+			int count = Math.max(inventoryCounts[index], 0);
+			int keep = Math.min(count, budget);
+			budget -= keep;
+			drops[index] = count - keep;
+		}
+
+		return drops;
+	}
+
+	/** Guards against re-entering enforcement from the inventory writes it performs itself. */
+	private static final ThreadLocal<Boolean> ENFORCING = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
+	/**
+	 * Drops every totem beyond the two the holder may carry.
+	 *
+	 * <p>The offhand totem is never touched. One further totem is kept from the lowest inventory slot
+	 * that holds one, and every remaining totem is dropped into the world with {@code Player.drop}, so
+	 * nothing is deleted or duplicated and a dropped stack keeps its count. Re-entrancy is blocked
+	 * because the slot writes below run through the same inventory hooks that call this method.
+	 *
+	 * @return how many totems were dropped
 	 */
 	public static int enforce(ServerPlayer player) {
-		if (player == null) {
+		if (player == null || ENFORCING.get()) {
+			return 0;
+		}
+
+		// Dragons Pride only exists while the curse is held. Without this gate the limit stayed active
+		// after a withdrawal, a removal or a transfer away, and a player who legitimately carried more
+		// than two totems had them dropped for no reason.
+		MinecraftServer server = player.level().getServer();
+
+		if (server == null || !appliesTo(DragonMaceCurse.activeOwner(server), player.getUUID())) {
 			return 0;
 		}
 
 		Inventory inventory = player.getInventory();
-		int remaining = excess(inventory);
 
-		if (remaining <= 0) {
+		if (countTotems(inventory) <= MAX_TOTEMS) {
 			return 0;
 		}
 
-		int dropped = 0;
+		ENFORCING.set(Boolean.TRUE);
 
-		for (int slot = inventory.getContainerSize() - 1; slot >= 0 && remaining > 0; slot--) {
-			ItemStack stack = inventory.getItem(slot);
+		try {
+			int slots = Inventory.SELECTION_SIZE + 27;
+			int[] counts = new int[slots];
 
-			if (!isTotem(stack)) {
-				continue;
+			for (int slot = 0; slot < slots; slot++) {
+				counts[slot] = count(inventory.getItem(slot));
 			}
 
-			int taken = Math.min(remaining, stack.getCount());
-			remaining -= taken;
-			dropped += taken;
+			int[] drops = planDrops(count(inventory.getItem(Inventory.SLOT_OFFHAND)), counts);
+			int dropped = 0;
 
-			ItemStack removed = stack.copy();
-			removed.setCount(taken);
+			for (int slot = 0; slot < slots; slot++) {
+				if (drops[slot] <= 0) {
+					continue;
+				}
 
-			if (taken >= stack.getCount()) {
-				inventory.setItem(slot, ItemStack.EMPTY);
-			} else {
-				ItemStack kept = stack.copy();
-				kept.setCount(stack.getCount() - taken);
-				inventory.setItem(slot, kept);
+				ItemStack stack = inventory.getItem(slot);
+				ItemStack excess = stack.copyWithCount(drops[slot]);
+				stack.shrink(drops[slot]);
+
+				if (stack.isEmpty()) {
+					inventory.setItem(slot, ItemStack.EMPTY);
+				}
+
+				player.drop(excess, false);
+				dropped += drops[slot];
 			}
 
-			player.drop(removed, false);
+			return dropped;
+		} finally {
+			ENFORCING.set(Boolean.FALSE);
 		}
+	}
 
-		if (dropped > 0) {
-			DragonMace.LOGGER.info("Dragons Pride dropped {} excess Totem(s) for {}.", dropped,
-					player.getName().getString());
-		}
+	private static int count(ItemStack stack) {
+		return isTotem(stack) ? stack.getCount() : 0;
+	}
 
-		return dropped;
+	/**
+	 * True when Dragons Pride applies to {@code player}.
+	 *
+	 * <p>The limit exists only for the player who currently owns the curse. Pure, so the whole lifecycle
+	 * can be tested without a server: a withdrawal, a removal or a transfer away clears the owner, and
+	 * this returns {@code false} immediately afterwards, which is what lifts the restriction.
+	 */
+	public static boolean appliesTo(UUID owner, UUID player) {
+		return owner != null && owner.equals(player);
 	}
 }

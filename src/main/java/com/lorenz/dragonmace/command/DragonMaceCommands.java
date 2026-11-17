@@ -2,6 +2,7 @@ package com.lorenz.dragonmace.command;
 
 import com.lorenz.dragonmace.DragonMace;
 import com.lorenz.dragonmace.DragonMaceCurse;
+import com.lorenz.dragonmace.DragonMaceEnchantmentMenu;
 import com.lorenz.dragonmace.DragonMaceItems;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
@@ -17,6 +18,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.NameAndId;
+import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.Collection;
@@ -49,6 +51,7 @@ public final class DragonMaceCommands {
 								.executes(DragonMaceCommands::effect)))
 				.then(Commands.literal("remove")
 						.requires(source -> Commands.LEVEL_GAMEMASTERS.check(source.permissions()))
+						.executes(DragonMaceCommands::removeAll)
 						.then(Commands.argument("player", GameProfileArgument.gameProfile())
 								.executes(DragonMaceCommands::remove)))
 				.then(Commands.literal("giveitem")
@@ -60,13 +63,41 @@ public final class DragonMaceCommands {
 						.requires(source -> source.getPlayer() != null)
 						.executes(DragonMaceCommands::withdraw))
 				.then(Commands.literal("status")
-						.executes(DragonMaceCommands::status));
+						.executes(DragonMaceCommands::status))
+				.then(Commands.literal("changeenchants")
+						.requires(source -> source.getPlayer() != null)
+						.executes(DragonMaceCommands::openEnchantments));
 
 		CommandNode<CommandSourceStack> dm = dispatcher.register(root);
 		dispatcher.register(Commands.literal("dragonmace").redirect(dm));
 
 		DragonMace.LOGGER.info(
-				"Registered /dm and /dragonmace with effect, remove, giveitem, withdraw and status.");
+				"Registered /dm and /dragonmace with effect, remove, giveitem, withdraw, status and changeenchants.");
+	}
+
+	/**
+	 * {@code /dm changeenchants}: opens the global Draconic Mace enchantment configuration menu.
+	 *
+	 * <p>Only the active Curse of the Dragons holder may open it. The menu owns Confirm, Cancel and the
+	 * server-wide cooldown, and re-checks ownership on every click, so this gate is the first of two.
+	 */
+	private static int openEnchantments(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+		CommandSourceStack source = context.getSource();
+		ServerPlayer player = source.getPlayerOrException();
+		MinecraftServer server = source.getServer();
+
+		if (!DragonMaceCurse.isActive(server, player.getUUID())) {
+			source.sendFailure(Component.literal(
+					"Only the holder of the Curse of the Dragons may change the mace enchantments."));
+			return 0;
+		}
+
+		player.openMenu(new SimpleMenuProvider(
+				(containerId, inventory, opener) -> new DragonMaceEnchantmentMenu(containerId, inventory),
+				Component.literal("Draconic Mace Enchantments")));
+
+		source.sendSuccess(() -> Component.literal("Opened the Draconic Mace enchantment menu."), false);
+		return 1;
 	}
 
 	/** {@code /dm effect <player>}: grants the Curse of the Dragons, respecting the single-owner rule. */
@@ -100,10 +131,28 @@ public final class DragonMaceCommands {
 	}
 
 	/**
-	 * {@code /dm remove <player>}: clears the active curse.
+	 * {@code /dm remove}: clears the curse for every player, online and offline.
 	 *
-	 * <p>Uses a game profile argument, so an offline holder can be cleared from the saved data. Their
-	 * leftover effects are cleaned up the next time they log in.
+	 * <p>No player argument is needed and no player has to be online. The global owner is cleared
+	 * first, then every online player is cleaned and every saved player file is purged.
+	 */
+	private static int removeAll(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		DragonMaceCurse.GlobalRemoval result = DragonMaceCurse.removeAll(source.getServer());
+
+		source.sendSuccess(() -> Component.literal("Removed the Curse of the Dragons from every player: "
+				+ result.cleaned() + " cleaned (" + result.online() + " online, " + result.purged()
+				+ " saved files purged, " + result.alreadyClean() + " already clean), "
+				+ result.failed() + " failed."), true);
+
+		return result.failed() == 0 ? 1 : 0;
+	}
+
+	/**
+	 * {@code /dm remove <player>}: kept for compatibility, and now performs the global removal too.
+	 *
+	 * <p>The profile argument still resolves a UUID for an offline player, so the old syntax keeps
+	 * working, but the removal itself is global: every holder and every saved aura is cleared.
 	 */
 	private static int remove(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
 		CommandSourceStack source = context.getSource();
@@ -117,14 +166,14 @@ public final class DragonMaceCommands {
 
 		NameAndId profile = profiles.iterator().next();
 		String name = profile.name() == null ? profile.id().toString() : profile.name();
+		DragonMaceCurse.GlobalRemoval result = DragonMaceCurse.removeAll(server);
 
-		if (!DragonMaceCurse.remove(server, profile.id())) {
-			source.sendFailure(Component.literal(name + " does not hold the Curse of the Dragons."));
-			return 0;
-		}
+		source.sendSuccess(() -> Component.literal("Removed the Curse of the Dragons from every player "
+				+ "(requested for " + name + "): " + result.cleaned() + " cleaned (" + result.online()
+				+ " online, " + result.purged() + " saved files purged, " + result.alreadyClean()
+				+ " already clean), " + result.failed() + " failed."), true);
 
-		source.sendSuccess(() -> Component.literal("Removed the Curse of the Dragons from " + name + "."), true);
-		return 1;
+		return result.failed() == 0 ? 1 : 0;
 	}
 
 	/** {@code /dm withdraw}: the active holder trades the curse back for one Very Heavy Core. */

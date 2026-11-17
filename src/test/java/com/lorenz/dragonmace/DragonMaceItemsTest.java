@@ -61,7 +61,7 @@ class DragonMaceItemsTest {
 	void veryHeavyCoreUsesTheVanillaHeavyCoreModel() {
 		ItemStack core = DragonMaceItems.createVeryHeavyCoreStack();
 
-		assertEquals(Identifier.withDefaultNamespace("block/heavy_core"),
+		assertEquals(Identifier.withDefaultNamespace("heavy_core"),
 				core.get(DataComponents.ITEM_MODEL));
 	}
 
@@ -137,7 +137,8 @@ class DragonMaceItemsTest {
 		assertEquals("Dragons Wrath: Convert maces in your inventory to the Draconic Mace",
 				lore.get(7).getString());
 		assertEquals("Dragons Aura: Gain permanent glowing and a dragon Aura.", lore.get(8).getString());
-		assertEquals("Dragons Pride: Totems stop working on you.", lore.get(9).getString());
+		assertEquals("Dragons Pride: You may carry and use up to two Totems of Undying.",
+				lore.get(9).getString());
 		assertEquals("Curse transfers to killer on death.", lore.get(10).getString());
 		assertEquals("Right-click to consume", lore.get(16).getString());
 		assertEquals("LEGNDARY CONSUMABLE", lore.get(18).getString());
@@ -159,9 +160,8 @@ class DragonMaceItemsTest {
 
 		assertTrue(draconic.is(Items.MACE));
 		assertTrue(DragonMaceIdentity.isDraconicMace(draconic));
-		assertEquals(DragonMaceRecipes.DRAGON_MACE_NAME, draconic.getHoverName().getString());
-		assertEquals(Rarity.EPIC, draconic.get(DataComponents.RARITY));
-		assertEquals(10, DragonMaceItems.draconicMaceLore().size());
+		assertEquals("Draconic Mace \u272A\u272A\u272A\u272A\u272A\u278E", draconic.getHoverName().getString());
+		assertEquals(19, DragonMaceItems.draconicMaceLore().size());
 	}
 
 	@Test
@@ -190,10 +190,12 @@ class DragonMaceItemsTest {
 
 		assertTrue(reverted.is(Items.MACE));
 		assertFalse(DragonMaceIdentity.isDraconicMace(reverted));
-		assertNull(reverted.get(DataComponents.CUSTOM_NAME));
 		assertNull(reverted.get(DataComponents.LORE));
 		assertNull(reverted.get(DataComponents.RARITY));
-		assertNull(reverted.get(DataComponents.CUSTOM_DATA));
+		assertTrue(DragonMaceIdentity.isRevertedDraconicMace(reverted));
+		assertNull(reverted.get(DataComponents.CUSTOM_NAME));
+		assertEquals("Mace", reverted.getHoverName().getString(),
+				"the reverted mace must use the vanilla name");
 	}
 
 	@Test

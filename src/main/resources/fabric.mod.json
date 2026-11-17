@@ -13,17 +13,22 @@
 	},
 	"license": "CC0-1.0",
 	"icon": "assets/dragon-mace/icon.png",
-	"environment": "server",
+	"environment": "*",
 	"entrypoints": {
 		"main": [
 			"com.lorenz.dragonmace.DragonMace"
+		],
+		"client": [
+			"com.lorenz.dragonmace.client.DragonMaceClient"
 		]
 	},
+	"accessWidener": "dragon-mace.accesswidener",
 	"mixins": [
 		"dragon-mace.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=0.20.1",
+		"fabric-api": "*",
 		"minecraft": "~1.21.11",
 		"java": ">=21"
 	}

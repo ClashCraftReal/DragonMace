@@ -3,6 +3,7 @@ package com.lorenz.dragonmace.mixin;
 import java.util.UUID;
 
 import com.lorenz.dragonmace.DragonMaceIdentity;
+import com.lorenz.dragonmace.DragonMaceMaceConversion;
 import com.lorenz.dragonmace.DragonMacePickup;
 import com.lorenz.dragonmace.DragonMaceProtection;
 
@@ -14,7 +15,9 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * Applies the Dragon Mace ground protections to every item entity that receives the stack, enforces
@@ -34,6 +37,37 @@ public class ItemEntityMixin {
 	@Inject(method = "setItem", at = @At("TAIL"))
 	private void dragonmace$protectDroppedMace(ItemStack stack, CallbackInfo ci) {
 		DragonMaceProtection.protectItemEntity((ItemEntity) (Object) this);
+	}
+
+	/**
+	 * Makes a protected dropped stack fire and lava immune.
+	 *
+	 * <p>{@code ItemEntity.fireImmune()} is the gate {@code Entity.lavaHurt} consults before it applies
+	 * lava damage and sets the entity alight, so returning {@code true} here stops both. Invulnerability
+	 * already blocks the damage through {@code hurtServer}, but without this the entity still caught fire
+	 * and played the lava hurt sound. Void destruction is a position check, not damage, so a protected
+	 * stack still disappears below the world.
+	 */
+	@Inject(method = "fireImmune", at = @At("HEAD"), cancellable = true)
+	private void dragonmace$fireImmune(CallbackInfoReturnable<Boolean> cir) {
+		ItemEntity entity = (ItemEntity) (Object) this;
+
+		if (DragonMaceProtection.isFireImmune(entity.getItem())) {
+			cir.setReturnValue(true);
+		}
+	}
+
+	/**
+	 * Reverts a Draconic Mace the moment it becomes a ground item.
+	 *
+	 * <p>A drop is the other way a mace leaves the cursed player's inventory: {@code Player.drop}
+	 * removes the stack from the inventory and hands it to a new item entity. Reverting the argument
+	 * before it is stored means the entity carries a normal mace, so the item is neither lost nor
+	 * duplicated and a later pickup by the holder converts it again.
+	 */
+	@ModifyVariable(method = "setItem", at = @At("HEAD"), argsOnly = true)
+	private ItemStack dragonmace$revertLeavingMace(ItemStack stack) {
+		return DragonMaceMaceConversion.revertLeaving(stack);
 	}
 
 	/**

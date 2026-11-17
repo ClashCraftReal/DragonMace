@@ -38,7 +38,6 @@ public class RecipeManagerMixin {
 			argsOnly = true
 	)
 	private RecipeMap dragonmace$rewriteRecipes(RecipeMap recipes) {
-		DragonMace.LOGGER.info("Disabled the vanilla mace crafting recipe ({})", DragonMaceRecipes.VANILLA_MACE_RECIPE);
 		return DragonMaceRecipes.apply(recipes);
 	}
 

@@ -1,0 +1,14 @@
+accessWidener	v2	named
+
+# The enchantment configuration menu needs its own MenuType, and the constructor plus its supplier
+# interface are private in vanilla. Opening them up is the smallest change that allows a custom menu
+# without adding a new item.
+accessible	method	net/minecraft/world/inventory/MenuType	<init>	(Lnet/minecraft/world/inventory/MenuType$MenuSupplier;Lnet/minecraft/world/flag/FeatureFlagSet;)V
+accessible	class	net/minecraft/world/inventory/MenuType$MenuSupplier
+
+# Binding the menu to its screen goes through MenuScreens.register, which is private.
+accessible	method	net/minecraft/client/gui/screens/MenuScreens	register	(Lnet/minecraft/world/inventory/MenuType;Lnet/minecraft/client/gui/screens/MenuScreens$ScreenConstructor;)V
+accessible	class	net/minecraft/client/gui/screens/MenuScreens$ScreenConstructor
+
+# The anvil guard needs the viewing player, which ItemCombinerMenu keeps in a protected field.
+accessible	field	net/minecraft/world/inventory/ItemCombinerMenu	player	Lnet/minecraft/world/entity/player/Player;
