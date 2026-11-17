@@ -111,6 +111,26 @@ public final class DragonMaceAnnouncements {
 	}
 
 	/**
+	 * Announces a newly unlocked rune.
+	 *
+	 * <p>The rune's own name carries its assigned colour, so the announcement matches the GUI and the
+	 * item lore. Broadcast to every online player, like every other announcement.
+	 */
+	public static void runeUnlocked(MinecraftServer server, String playerName, DragonMaceRune rune) {
+		if (server == null || rune == null) {
+			return;
+		}
+
+		Component message = Component.empty()
+				.append(Component.literal((playerName == null ? "A player" : playerName) + " unlocked the ")
+						.withStyle(ChatFormatting.LIGHT_PURPLE))
+				.append(Component.literal(rune.displayName()).withStyle(rune.colour()))
+				.append(Component.literal(" rune.").withStyle(ChatFormatting.LIGHT_PURPLE));
+
+		server.getPlayerList().broadcastSystemMessage(message, false);
+	}
+
+	/**
 	 * Sends one message to every online player. Kept in one place so no event can accidentally use a
 	 * different audience or a second duplicate hook.
 	 */

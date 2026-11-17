@@ -122,7 +122,9 @@ public final class DragonMaceCurse {
 
 	/** Applies every curse effect to a player who already holds the curse. */
 	public static void apply(MinecraftServer server, ServerPlayer player) {
-		DragonMaceMaceConversion.convertInventory(player, server.registryAccess());
+		// Deferred by a tick, so a kill's death message still reports the weapon the killer was holding
+		// when the curse transferred at the head of ServerPlayer.die.
+		DragonMaceMaceConversion.scheduleConversion(server, player);
 		// The holder's maces carry the configured enchantments, immediately.
 		DragonMaceEnchantments.reconcileContainer(player.getInventory(), true, server.registryAccess(),
 				DragonMaceConfig.get());

@@ -120,25 +120,19 @@ public final class DragonMaceItems {
 		return List.copyOf(lines);
 	}
 
-	/** The five gold stars of the Draconic Mace name. */
-	public static final String DRACONIC_STARS = "\u272A\u272A\u272A\u272A\u272A";
-	/** The red circled five that closes the Draconic Mace name. */
-	public static final String DRACONIC_TIER = "\u278E";
 	/** The rune glyph that opens the Draconic Rune lore line. */
 	public static final String DRACONIC_RUNE_GLYPH = "\u25C6";
 
 	/**
-	 * The exact Draconic Mace name, reproduced from the design command.
+	 * The Draconic Mace name.
 	 *
-	 * <p>Four runs: the light purple name, a plain space, five gold stars and the red tier glyph. Every
-	 * run is explicitly non-italic, because vanilla italicises a custom name by default.
+	 * <p>A single light purple run reading exactly {@code Draconic Mace}. The decorative gold stars and
+	 * the red tier glyph that used to follow the name were removed, along with the space that separated
+	 * them, so the displayed name carries no trailing decoration. The run is explicitly non-italic,
+	 * because vanilla italicises a custom name by default.
 	 */
 	public static Component draconicMaceName() {
-		return Component.empty()
-				.append(styled("Draconic Mace", ChatFormatting.LIGHT_PURPLE))
-				.append(Component.literal(" ").withStyle(Style.EMPTY.withItalic(false)))
-				.append(styled(DRACONIC_STARS, ChatFormatting.GOLD))
-				.append(styled(DRACONIC_TIER, ChatFormatting.RED));
+		return styled("Draconic Mace", ChatFormatting.LIGHT_PURPLE);
 	}
 
 	private static MutableComponent obfuscated(String text, ChatFormatting color) {
@@ -154,14 +148,32 @@ public final class DragonMaceItems {
 	 * {@code X} characters and the trailing spaces are intentional and must not be normalised.
 	 */
 	public static List<Component> draconicMaceLore() {
-		List<Component> lines = new ArrayList<>(19);
+		return draconicMaceLore(DragonMaceLoreContext.fromConfig(DragonMaceConfig.get()));
+	}
+
+	/**
+	 * The Draconic Mace lore for one progression context.
+	 *
+	 * <p>Five content sections separated by blank lines: the gear score, the enchantment summary, the
+	 * three rune lines, the kill counter, and the converted-by, Soulbound and Mythic Mace footer. The
+	 * enchantment summary is bold gold; each rune line carries its own rune colour and is never bold.
+	 * Colours, bold runs, the obfuscated {@code X} characters and the trailing spaces are intentional and
+	 * must not be normalised.
+	 */
+	public static List<Component> draconicMaceLore(DragonMaceLoreContext context) {
+		DragonMaceLoreContext value = context == null
+				? DragonMaceLoreContext.fromConfig(DragonMaceConfig.get())
+				: context;
+		List<Component> lines = new ArrayList<>(26);
 
 		lines.add(Component.empty()
 				.append(styled("Gear Score: ", ChatFormatting.GRAY))
 				.append(styled("9999 ", ChatFormatting.LIGHT_PURPLE))
 				.append(styled("(9999)", ChatFormatting.DARK_AQUA)));
 		lines.add(Component.empty());
-		lines.add(bold("Wind Burst III, Density V", ChatFormatting.GOLD));
+
+		String summary = value.enchantmentSummary();
+		lines.add(bold(summary.isEmpty() ? "No enchantments" : summary, ChatFormatting.GOLD));
 		lines.add(Component.empty());
 		lines.add(Component.empty()
 				.append(styled("Ability: Enchant Chooser", ChatFormatting.GOLD))
@@ -187,7 +199,25 @@ public final class DragonMaceItems {
 				.append(styled("damage", ChatFormatting.RED))
 				.append(styled(" the higher the fall.", ChatFormatting.GRAY)));
 		lines.add(Component.empty());
-		lines.add(styled(DRACONIC_RUNE_GLYPH + " Draconic Rune III", ChatFormatting.WHITE));
+
+		for (DragonMaceRuneCategory category : DragonMaceRuneCategory.values()) {
+			DragonMaceRune rune = value.runes().get(category);
+			MutableComponent runeLine = Component.empty()
+					.append(styled(DRACONIC_RUNE_GLYPH + " " + category.loreLabel(), ChatFormatting.WHITE))
+					.append(styled(rune.displayName(), rune.colour()));
+
+			if (!value.toggles().get(category)) {
+				runeLine.append(styled(" (Disabled)", ChatFormatting.DARK_GRAY));
+			}
+
+			lines.add(runeLine);
+		}
+
+		lines.add(Component.empty());
+		lines.add(Component.empty()
+				.append(styled("Kills", ChatFormatting.WHITE))
+				.append(styled(": ", ChatFormatting.WHITE))
+				.append(styled(Integer.toString(value.kills()), ChatFormatting.GOLD)));
 		lines.add(Component.empty());
 		lines.add(styled("*Converted by Curse of the Dragons*", ChatFormatting.DARK_GRAY));
 		lines.add(styled("*Soulbound*", ChatFormatting.DARK_GRAY));
@@ -256,6 +286,20 @@ public final class DragonMaceItems {
 	 * real Density V and Wind Burst III enchantments.
 	 */
 	public static ItemStack createDraconicMaceStack(ItemStack source, RegistryAccess registries) {
+		return createDraconicMaceStack(source, registries, DragonMaceLoreContext.defaults(registries));
+	}
+
+	/**
+	 * Converts a mace into the Draconic Mace with an explicit progression context.
+	 *
+	 * <p>The context supplies the enchantment summary, the three rune lines and the kill counter, so a
+	 * mace created for a player always shows that player's real progression instead of a placeholder.
+	 */
+	public static ItemStack createDraconicMaceStack(ItemStack source, RegistryAccess registries,
+			DragonMaceLoreContext context) {
+		DragonMaceLoreContext value = context == null
+				? DragonMaceLoreContext.defaults(registries)
+				: context;
 		ItemStack stack = source == null || source.isEmpty() ? new ItemStack(Items.MACE) : source.copy();
 
 		CompoundTag tag = DragonMaceIdentity.copyTag(stack);
@@ -265,7 +309,7 @@ public final class DragonMaceItems {
 		stack.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
 		// The canonical name is always restored, whatever the player renamed the reverted mace to.
 		stack.set(DataComponents.CUSTOM_NAME, draconicMaceName());
-		stack.set(DataComponents.LORE, new ItemLore(draconicMaceLore()));
+		stack.set(DataComponents.LORE, new ItemLore(draconicMaceLore(value)));
 		stack.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
 		stack.set(DataComponents.UNBREAKABLE, Unit.INSTANCE);
 		stack.set(DataComponents.TOOLTIP_DISPLAY, draconicTooltipDisplay());
@@ -275,6 +319,36 @@ public final class DragonMaceItems {
 
 		applyPlaceholderEnchantments(stack, registries);
 		return stack;
+	}
+
+	/**
+	 * Rebuilds the name, lore and enchantments of an existing Draconic Mace in place.
+	 *
+	 * <p>Idempotent and non-destructive: the stack keeps its slot, its damage and its identity marker, and
+	 * only the presentation components are rewritten. Called after a kill, after a rune confirmation and
+	 * whenever the curse is applied, so the item never shows a stale enchantment, rune or kill count.
+	 *
+	 * @return true when the stack was a Draconic Mace and was refreshed
+	 */
+	public static boolean refreshDraconicMace(ItemStack stack, DragonMaceLoreContext context) {
+		if (stack == null || stack.isEmpty() || !DragonMaceIdentity.isDraconicMace(stack)) {
+			return false;
+		}
+
+		DragonMaceLoreContext value = context == null
+				? DragonMaceLoreContext.fromConfig(DragonMaceConfig.get())
+				: context;
+		stack.set(DataComponents.CUSTOM_NAME, draconicMaceName());
+		stack.set(DataComponents.LORE, new ItemLore(draconicMaceLore(value)));
+		stack.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
+		stack.set(DataComponents.UNBREAKABLE, Unit.INSTANCE);
+		stack.set(DataComponents.TOOLTIP_DISPLAY, draconicTooltipDisplay());
+
+		if (!value.enchantments().isEmpty()) {
+			stack.set(DataComponents.ENCHANTMENTS, value.enchantments());
+		}
+
+		return true;
 	}
 
 	/**

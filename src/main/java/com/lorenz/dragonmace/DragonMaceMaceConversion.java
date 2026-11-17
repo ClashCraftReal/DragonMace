@@ -1,7 +1,15 @@
 package com.lorenz.dragonmace;
 
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
@@ -43,6 +51,109 @@ public final class DragonMaceMaceConversion {
 	}
 
 	/**
+	 * Ticks to wait before an eligible mace is converted.
+	 *
+	 * <p>One tick is enough to leave the damage and death processing sequence: the curse transfer runs at
+	 * the head of {@code ServerPlayer.die} and the death message is built later in the same call, so a
+	 * conversion deferred by a tick cannot change the weapon that message reports. It is short enough to
+	 * be imperceptible in play.
+	 */
+	public static final int CONVERSION_DELAY_TICKS = 1;
+
+	/** Players with a conversion waiting, mapped to the tick it becomes due. */
+	private static final Map<UUID, Integer> PENDING = new ConcurrentHashMap<>();
+
+	/** The tick a conversion scheduled at {@code now} becomes due. */
+	public static int dueTick(int now) {
+		return now + CONVERSION_DELAY_TICKS;
+	}
+
+	/** True when a conversion due at {@code due} may run at {@code now}. */
+	public static boolean isDue(int due, int now) {
+		return now >= due;
+	}
+
+	/**
+	 * Queues one conversion for {@code player}.
+	 *
+	 * <p>Keyed by UUID with {@code putIfAbsent}, so the repeated inventory writes during the delay cannot
+	 * queue the same player twice.
+	 *
+	 * @return true when this call queued the conversion
+	 */
+	static boolean schedule(UUID player, int now) {
+		return player != null && PENDING.putIfAbsent(player, dueTick(now)) == null;
+	}
+
+	/** Queues one conversion for {@code player} on the server clock. */
+	public static boolean scheduleConversion(MinecraftServer server, ServerPlayer player) {
+		if (server == null || player == null) {
+			return false;
+		}
+
+		return schedule(player.getUUID(), server.getTickCount());
+	}
+
+	/** How many conversions are waiting. */
+	public static int pendingConversions() {
+		return PENDING.size();
+	}
+
+	/** Drops every waiting conversion; used by tests and on shutdown. */
+	public static void clearPending() {
+		PENDING.clear();
+	}
+
+	/**
+	 * Removes and returns every player whose conversion is due at {@code now}.
+	 *
+	 * <p>Removal happens before the caller converts, so a conversion that throws cannot leave the entry
+	 * behind and retry forever.
+	 */
+	static List<UUID> takeDue(int now) {
+		List<UUID> due = new ArrayList<>();
+
+		for (Iterator<Map.Entry<UUID, Integer>> it = PENDING.entrySet().iterator(); it.hasNext();) {
+			Map.Entry<UUID, Integer> entry = it.next();
+
+			if (isDue(entry.getValue(), now)) {
+				it.remove();
+				due.add(entry.getKey());
+			}
+		}
+
+		return due;
+	}
+
+	/**
+	 * Runs every conversion that has come due.
+	 *
+	 * <p>A player who disconnected or lost the curse during the delay is skipped, so the delay can never
+	 * convert a mace for someone who is no longer eligible.
+	 *
+	 * @return the number of stacks converted
+	 */
+	public static int tick(MinecraftServer server) {
+		if (server == null || PENDING.isEmpty()) {
+			return 0;
+		}
+
+		int converted = 0;
+
+		for (UUID player : takeDue(server.getTickCount())) {
+			ServerPlayer online = server.getPlayerList().getPlayer(player);
+
+			if (online == null || !DragonMaceCurse.isActive(server, player)) {
+				continue;
+			}
+
+			converted += convertInventory(online, server.registryAccess());
+		}
+
+		return converted;
+	}
+
+	/**
 	 * Brings the player's inventory in line with their curse state.
 	 *
 	 * <p>A cursed holder has every eligible mace converted; anyone else has every Draconic Mace
@@ -64,7 +175,17 @@ public final class DragonMaceMaceConversion {
 
 		try {
 			boolean eligible = DragonMaceCurse.isActive(player.level().getServer(), player.getUUID());
-			int changed = eligible ? convertInventory(player, registries) : revertInventory(player);
+			int changed;
+
+			if (eligible) {
+				// Conversion is deferred by a tick so a kill's death message still reports the weapon the
+				// killer was holding. Reversion stays immediate: a mace that leaves must stop being
+				// Draconic at once.
+				scheduleConversion(player.level().getServer(), player);
+				changed = 0;
+			} else {
+				changed = revertInventory(player);
+			}
 
 			// Every mace, Draconic or not, then follows the ownership rule: the holder keeps the
 			// configured enchantments, everyone else keeps none.
@@ -86,7 +207,11 @@ public final class DragonMaceMaceConversion {
 			return 0;
 		}
 
-		int converted = convertContainer(player.getInventory(), registries);
+		MinecraftServer server = player.level().getServer();
+		DragonMaceLoreContext context = server == null
+				? DragonMaceLoreContext.defaults(registries)
+				: DragonMaceProgression.loreContext(server, player, registries);
+		int converted = convertContainer(player.getInventory(), registries, context);
 
 		if (converted > 0) {
 			DragonMace.LOGGER.info("Dragons Wrath converted {} mace stack(s) for {}.", converted,
@@ -106,6 +231,16 @@ public final class DragonMaceMaceConversion {
 	 * @return the number of stacks converted
 	 */
 	public static int convertContainer(Container container, RegistryAccess registries) {
+		return convertContainer(container, registries, null);
+	}
+
+	/**
+	 * Converts every eligible mace in {@code container}, using an explicit progression context.
+	 *
+	 * @return the number of stacks converted
+	 */
+	public static int convertContainer(Container container, RegistryAccess registries,
+			DragonMaceLoreContext context) {
 		if (container == null) {
 			return 0;
 		}
@@ -113,7 +248,7 @@ public final class DragonMaceMaceConversion {
 		int converted = 0;
 
 		for (int slot = 0; slot < container.getContainerSize(); slot++) {
-			if (convertSlot(container, slot, registries)) {
+			if (convertSlot(container, slot, registries, context)) {
 				converted++;
 			}
 		}
@@ -127,6 +262,16 @@ public final class DragonMaceMaceConversion {
 	 * @return true when the slot held an eligible mace and was converted
 	 */
 	public static boolean convertSlot(Container container, int slot, RegistryAccess registries) {
+		return convertSlot(container, slot, registries, null);
+	}
+
+	/**
+	 * Converts the stack in one slot, in place, with an explicit progression context.
+	 *
+	 * @return true when the slot held an eligible mace and was converted
+	 */
+	public static boolean convertSlot(Container container, int slot, RegistryAccess registries,
+			DragonMaceLoreContext context) {
 		if (container == null || slot < 0 || slot >= container.getContainerSize()) {
 			return false;
 		}
@@ -137,7 +282,7 @@ public final class DragonMaceMaceConversion {
 			return false;
 		}
 
-		container.setItem(slot, DragonMaceItems.createDraconicMaceStack(stack, registries));
+		container.setItem(slot, DragonMaceItems.createDraconicMaceStack(stack, registries, context));
 		return true;
 	}
 

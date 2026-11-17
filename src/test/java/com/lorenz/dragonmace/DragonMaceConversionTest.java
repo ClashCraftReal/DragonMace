@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 import net.minecraft.ChatFormatting;
@@ -307,34 +308,108 @@ class DragonMaceConversionTest {
 
 	@Test
 	void theDraconicNameIsExact() {
-		assertEquals("Draconic Mace \u272A\u272A\u272A\u272A\u272A\u278E",
-				draconic().getHoverName().getString());
+		assertEquals("Draconic Mace", draconic().getHoverName().getString());
+	}
+
+	@Test
+	void theDraconicNameCarriesNoDecoration() {
+		String name = DragonMaceItems.draconicMaceName().getString();
+
+		assertEquals("Draconic Mace", name, "the displayed name must be exactly the name");
+		assertFalse(name.contains("\u272A"), "the decorative stars must be gone: " + name);
+		assertFalse(name.contains("\u278E"), "the tier glyph must be gone: " + name);
+		assertFalse(name.endsWith(" "), "the separator space must be gone: " + name);
 	}
 
 	@Test
 	void theDraconicNameRunsCarryTheExactStyles() {
 		List<Component> runs = DragonMaceItems.draconicMaceName().getSiblings();
 
-		assertEquals(4, runs.size());
-		assertEquals("Draconic Mace", runs.get(0).getString());
-		assertEquals(ChatFormatting.LIGHT_PURPLE.getColor(), runs.get(0).getStyle().getColor().getValue());
-		assertFalse(Boolean.TRUE.equals(runs.get(0).getStyle().isItalic()), "the name must not be italic");
-		assertEquals("\u272A\u272A\u272A\u272A\u272A", runs.get(2).getString());
-		assertEquals("\u278E", runs.get(3).getString());
-		assertFalse(Boolean.TRUE.equals(runs.get(3).getStyle().isItalic()));
+		assertTrue(runs.isEmpty(), "the name is a single run, not a compound");
+		assertEquals("Draconic Mace", DragonMaceItems.draconicMaceName().getString());
+		assertEquals(ChatFormatting.LIGHT_PURPLE.getColor(),
+				DragonMaceItems.draconicMaceName().getStyle().getColor().getValue());
+		assertFalse(Boolean.TRUE.equals(DragonMaceItems.draconicMaceName().getStyle().isItalic()),
+				"the name must not be italic");
+	}
+
+	// ------------------------------------------------------------ delayed conversion
+
+	@Test
+	void conversionIsDelayedByOneTick() {
+		assertEquals(1, DragonMaceMaceConversion.CONVERSION_DELAY_TICKS);
+		assertEquals(101, DragonMaceMaceConversion.dueTick(100));
+		assertFalse(DragonMaceMaceConversion.isDue(101, 100), "the same tick must not convert");
+		assertTrue(DragonMaceMaceConversion.isDue(101, 101), "the next tick must convert");
+		assertTrue(DragonMaceMaceConversion.isDue(101, 102));
 	}
 
 	@Test
-	void theLoreHasNineteenLines() {
+	void schedulingTheSamePlayerTwiceQueuesOneConversion() {
+		DragonMaceMaceConversion.clearPending();
+		UUID player = UUID.randomUUID();
+
+		assertTrue(DragonMaceMaceConversion.schedule(player, 100));
+		assertFalse(DragonMaceMaceConversion.schedule(player, 100), "a second schedule must be refused");
+		assertFalse(DragonMaceMaceConversion.schedule(player, 200), "a later schedule must be refused too");
+		assertEquals(1, DragonMaceMaceConversion.pendingConversions());
+		assertEquals(101, DragonMaceMaceConversion.dueTick(100));
+
+		DragonMaceMaceConversion.clearPending();
+	}
+
+	@Test
+	void aDueConversionIsReleasedExactlyOnce() {
+		DragonMaceMaceConversion.clearPending();
+		UUID player = UUID.randomUUID();
+		DragonMaceMaceConversion.schedule(player, 100);
+
+		assertTrue(DragonMaceMaceConversion.takeDue(100).isEmpty(), "not due yet");
+		assertEquals(List.of(player), DragonMaceMaceConversion.takeDue(101));
+		assertEquals(0, DragonMaceMaceConversion.pendingConversions());
+		assertTrue(DragonMaceMaceConversion.takeDue(101).isEmpty(), "released only once");
+
+		DragonMaceMaceConversion.clearPending();
+	}
+
+	@Test
+	void schedulingWithoutAPlayerIsRefused() {
+		assertFalse(DragonMaceMaceConversion.schedule(null, 100));
+		assertFalse(DragonMaceMaceConversion.scheduleConversion(null, null));
+	}
+
+	@Test
+	void theCurseApplyPathSchedulesInsteadOfConvertingImmediately() throws Exception {
+		String source = java.nio.file.Files.readString(java.nio.file.Path.of(
+				"src/main/java/com/lorenz/dragonmace/DragonMaceCurse.java"));
+
+		assertTrue(source.contains("DragonMaceMaceConversion.scheduleConversion(server, player)"),
+				"apply must defer the conversion or a kill's death message shows the Draconic Mace");
+		assertFalse(source.contains("DragonMaceMaceConversion.convertInventory("),
+				"apply must not convert immediately");
+	}
+
+	@Test
+	void theServerTickDrivesPendingConversions() throws Exception {
+		String source = java.nio.file.Files.readString(java.nio.file.Path.of(
+				"src/main/java/com/lorenz/dragonmace/DragonMace.java"));
+
+		assertTrue(source.contains("DragonMaceMaceConversion::tick"),
+				"a queued conversion must be driven by the server tick or it never runs");
+	}
+
+	@Test
+	void theLoreHasTwentyThreeLines() {
 		List<Component> lore = DragonMaceItems.draconicMaceLore();
 
-		assertEquals(19, lore.size());
+		assertEquals(23, lore.size());
 		assertEquals("", lore.get(1).getString());
 		assertEquals("", lore.get(3).getString());
 		assertEquals("", lore.get(9).getString());
 		assertEquals("", lore.get(13).getString());
-		assertEquals("", lore.get(15).getString());
-		assertEquals(19, draconic().get(DataComponents.LORE).lines().size());
+		assertEquals("", lore.get(17).getString());
+		assertEquals("", lore.get(19).getString());
+		assertEquals(23, draconic().get(DataComponents.LORE).lines().size());
 	}
 
 	@Test
@@ -357,16 +432,20 @@ class DragonMaceConversionTest {
 	}
 
 	@Test
-	void theDraconicRuneLineKeepsItsGlyphAndIsNotItalic() {
-		Component line = DragonMaceItems.draconicMaceLore().get(14);
+	void theRuneLinesKeepTheirGlyphAndAreNotItalic() {
+		List<Component> lore = DragonMaceItems.draconicMaceLore();
 
-		assertEquals("\u25C6 Draconic Rune III", line.getString());
-		assertFalse(Boolean.TRUE.equals(line.getStyle().isItalic()));
+		assertEquals("\u25C6 Kill Rune: Draconic", lore.get(14).getString());
+		assertEquals("\u25C6 Attack Rune: Draconic", lore.get(15).getString());
+		assertEquals("\u25C6 Aura Rune: Draconic", lore.get(16).getString());
+		assertFalse(Boolean.TRUE.equals(lore.get(14).getStyle().isItalic()));
+		assertFalse(Boolean.TRUE.equals(lore.get(15).getStyle().isItalic()));
+		assertFalse(Boolean.TRUE.equals(lore.get(16).getStyle().isItalic()));
 	}
 
 	@Test
 	void theSoulboundLineIsDarkGray() {
-		Component line = DragonMaceItems.draconicMaceLore().get(17);
+		Component line = DragonMaceItems.draconicMaceLore().get(21);
 
 		assertEquals("*Soulbound*", line.getString());
 		assertFalse(Boolean.TRUE.equals(line.getStyle().isItalic()));
@@ -374,7 +453,7 @@ class DragonMaceConversionTest {
 
 	@Test
 	void theMythicFooterObfuscatesBothXs() {
-		List<Component> runs = DragonMaceItems.draconicMaceLore().get(18).getSiblings();
+		List<Component> runs = DragonMaceItems.draconicMaceLore().get(22).getSiblings();
 
 		assertEquals(3, runs.size());
 		assertEquals("X", runs.get(0).getString());
@@ -383,7 +462,7 @@ class DragonMaceConversionTest {
 		assertTrue(Boolean.TRUE.equals(runs.get(0).getStyle().isObfuscated()));
 		assertTrue(Boolean.TRUE.equals(runs.get(2).getStyle().isObfuscated()));
 		assertTrue(Boolean.TRUE.equals(runs.get(1).getStyle().isBold()));
-		assertEquals("X Mythic Mace X", DragonMaceItems.draconicMaceLore().get(18).getString());
+		assertEquals("X Mythic Mace X", DragonMaceItems.draconicMaceLore().get(22).getString());
 	}
 
 	// --------------------------------------------------------- item properties
@@ -465,8 +544,8 @@ class DragonMaceConversionTest {
 		ItemStack reverted = DragonMaceItems.revertDraconicMace(draconic());
 		ItemStack again = DragonMaceItems.createDraconicMaceStack(reverted, registries);
 
-		assertEquals("Draconic Mace \u272A\u272A\u272A\u272A\u272A\u278E", again.getHoverName().getString());
-		assertEquals(19, again.get(DataComponents.LORE).lines().size());
+		assertEquals("Draconic Mace", again.getHoverName().getString());
+		assertEquals(23, again.get(DataComponents.LORE).lines().size());
 		assertEquals(Boolean.TRUE, again.get(DataComponents.ENCHANTMENT_GLINT_OVERRIDE));
 		assertNotNull(again.get(DataComponents.UNBREAKABLE));
 	}
@@ -496,11 +575,10 @@ class DragonMaceConversionTest {
 	}
 
 	@Test
-	void theStarAndTierRunsUseTheSpecifiedColours() {
+	void theTierRunIsGone() {
 		List<Component> runs = DragonMaceItems.draconicMaceName().getSiblings();
 
-		assertEquals(ChatFormatting.GOLD.getColor(), runs.get(2).getStyle().getColor().getValue());
-		assertEquals(ChatFormatting.RED.getColor(), runs.get(3).getStyle().getColor().getValue());
+		assertTrue(runs.isEmpty(), "there is no tier run left to colour");
 	}
 
 	@Test
@@ -528,15 +606,15 @@ class DragonMaceConversionTest {
 	void theConvertedLinePrecedesSoulbound() {
 		List<Component> lore = DragonMaceItems.draconicMaceLore();
 
-		assertEquals("*Converted by Curse of the Dragons*", lore.get(16).getString());
+		assertEquals("*Converted by Curse of the Dragons*", lore.get(20).getString());
 		assertEquals(ChatFormatting.DARK_GRAY.getColor(),
-				lore.get(16).getStyle().getColor().getValue());
-		assertEquals("*Soulbound*", lore.get(17).getString());
+				lore.get(20).getStyle().getColor().getValue());
+		assertEquals("*Soulbound*", lore.get(21).getString());
 	}
 
 	@Test
 	void theSoulboundColourIsDarkGray() {
-		Style style = DragonMaceItems.draconicMaceLore().get(17).getStyle();
+		Style style = DragonMaceItems.draconicMaceLore().get(21).getStyle();
 
 		assertEquals(ChatFormatting.DARK_GRAY.getColor(), style.getColor().getValue());
 	}
@@ -634,7 +712,7 @@ class DragonMaceConversionTest {
 		ItemStack again = DragonMaceItems.createDraconicMaceStack(reverted, registries);
 
 		assertTrue(DragonMaceIdentity.isDraconicMace(again));
-		assertEquals(19, again.get(DataComponents.LORE).lines().size());
+		assertEquals(23, again.get(DataComponents.LORE).lines().size());
 		assertNotNull(again.get(DataComponents.ENCHANTMENTS));
 		assertNotNull(again.get(DataComponents.ENCHANTABLE));
 	}
@@ -723,7 +801,7 @@ class DragonMaceConversionTest {
 
 		assertEquals(DragonMaceItems.draconicMaceName(), again.get(DataComponents.CUSTOM_NAME),
 				"the canonical Draconic name must win over any chosen name");
-		assertEquals("Draconic Mace \u272A\u272A\u272A\u272A\u272A\u278E",
+		assertEquals("Draconic Mace",
 				again.getHoverName().getString());
 	}
 

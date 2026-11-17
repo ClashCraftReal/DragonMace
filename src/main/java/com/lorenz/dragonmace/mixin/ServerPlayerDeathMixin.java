@@ -3,6 +3,7 @@ package com.lorenz.dragonmace.mixin;
 import com.lorenz.dragonmace.DragonMaceCurse;
 import com.lorenz.dragonmace.DragonMaceDeathMessage;
 import com.lorenz.dragonmace.DragonMaceDeathTransfer;
+import com.lorenz.dragonmace.DragonMaceProgression;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -49,11 +50,20 @@ public class ServerPlayerDeathMixin {
 
 		// After the transfer: sees the killer's mace once the curse has converted it.
 		DragonMaceDeathMessage.capture(victim, damageSource);
+
+		// Kill progression runs last, so the killer's mace has already been converted by the curse
+		// transfer and the kill that grants the curse also counts. beginDeath claims the victim so a
+		// second death event for the same victim in the same tick cannot double-count.
+		if (DragonMaceProgression.beginDeath(victim.getUUID())) {
+			DragonMaceProgression.registerKill(server, victim, damageSource);
+		}
 	}
 
-	/** Drops the snapshot once the death message has been built, so nothing is retained. */
+	/** Drops the snapshot and the death claim once the death has been processed. */
 	@Inject(method = "die", at = @At("RETURN"))
 	private void dragonmace$clearCapturedWeapon(DamageSource damageSource, CallbackInfo ci) {
-		DragonMaceDeathMessage.clear(((ServerPlayer) (Object) this).getUUID());
+		ServerPlayer victim = (ServerPlayer) (Object) this;
+		DragonMaceDeathMessage.clear(victim.getUUID());
+		DragonMaceProgression.endDeath(victim.getUUID());
 	}
 }

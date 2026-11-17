@@ -172,10 +172,10 @@ class DragonMaceDeathMessageTest {
 				Component.literal("Victim"), Component.literal("Killer"),
 				DragonMaceItems.draconicMaceName());
 
-		assertTrue(built.getString().contains(DragonMaceItems.DRACONIC_STARS),
-				"the gold stars must survive into the message");
-		assertTrue(built.getString().contains(DragonMaceItems.DRACONIC_TIER),
-				"the red tier glyph must survive into the message");
+		assertFalse(built.getString().contains("\u272A"),
+				"the decorative stars must not survive into the message");
+		assertFalse(built.getString().contains("\u278E"),
+				"the tier glyph must not survive into the message");
 	}
 
 	@Test

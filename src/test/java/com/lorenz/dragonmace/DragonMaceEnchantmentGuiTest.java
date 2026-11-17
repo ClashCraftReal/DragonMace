@@ -55,9 +55,9 @@ class DragonMaceEnchantmentGuiTest {
 	// ------------------------------------------------------------- layout
 
 	@Test
-	void theGuiHasExactlyTwentySevenSlots() {
-		assertEquals(27, DragonMaceEnchantmentLayout.SLOT_COUNT);
-		assertEquals(27, DragonMaceEnchantmentLayout.build(registries, 0,
+	void theGuiHasExactlyFiftyFourSlots() {
+		assertEquals(54, DragonMaceEnchantmentLayout.SLOT_COUNT);
+		assertEquals(54, DragonMaceEnchantmentLayout.build(registries, 0,
 				DragonMaceConfig.MainEnchantment.BREACH).length);
 	}
 
@@ -489,7 +489,7 @@ class DragonMaceEnchantmentGuiTest {
 		return 0;
 	}
 
-	private static RegistryAccess enchantmentRegistries() {
+	static RegistryAccess enchantmentRegistries() {
 		MappedRegistry<Enchantment> registry = new MappedRegistry<>(Registries.ENCHANTMENT,
 				Lifecycle.stable());
 		HolderSet<Item> supported = HolderSet.direct(BuiltInRegistries.ITEM.wrapAsHolder(Items.MACE));

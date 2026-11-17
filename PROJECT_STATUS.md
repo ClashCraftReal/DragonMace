@@ -11,7 +11,7 @@ Last updated: 2026-11-16.
 | Command | Result |
 | --- | --- |
 | `./gradlew clean build` | BUILD SUCCESSFUL |
-| `./gradlew test` | 459 tests, 0 failures, 0 errors, 0 skipped |
+| `./gradlew test` | 554 tests, 0 failures, 0 errors, 0 skipped |
 | `./gradlew runServer` | `Done (2.649s)!`, no mixin apply failure, no mod ERROR lines |
 
 `runServer` needs a free world directory and port, because another server process holds the
@@ -83,6 +83,135 @@ Three reported defects, each fixed at its root cause and locked down by
   storage container, Dragon Mace also allowed in a grid, ordinary items unaffected, plus the existing
   exact nine-ingredient recipe tests.
 - **In-game only:** placing the egg in the 3x3 grid and crafting the core in a live session.
+
+## Delayed mace conversion and star-free name — 2026-11-17
+
+- **Delayed conversion.** `DragonMaceCurse.apply` called `convertInventory` immediately, and `apply` runs
+  from `transfer` at the head of `ServerPlayer.die`. The killer's mace therefore became Draconic before
+  vanilla built the death message, so an ordinary-mace kill reported "Draconic Mace".
+  `DragonMaceMaceConversion` now queues the conversion instead: `scheduleConversion` keys a
+  `ConcurrentHashMap` by UUID with `putIfAbsent` (so repeated inventory writes cannot queue twice),
+  `takeDue` releases each entry exactly once, and `tick` runs the due ones from
+  `ServerTickEvents.END_SERVER_TICK`. A player who disconnected or lost the curse during the delay is
+  skipped. `CONVERSION_DELAY_TICKS` is 1, which is enough to leave the death call and imperceptible in
+  play. Reversion stays immediate, and `convertContainer`/`convertInventory` stay immediate for direct
+  callers and tests.
+- **Star-free name.** `draconicMaceName` dropped the gold `✪✪✪✪✪` run and the `DRACONIC_STARS`
+  constant, leaving the light purple name, a space and the red tier glyph: `Draconic Mace ➎`. The tier
+  glyph is not a star, so it is preserved.
+- **Files:** `DragonMaceMaceConversion.java`, `DragonMaceCurse.java`, `DragonMace.java`,
+  `DragonMaceItems.java`, `DragonMaceConversionTest.java`, `DragonMaceItemsTest.java`,
+  `DragonMaceDeathMessageTest.java`, `PROJECT_STATUS.md`.
+- **Automated:** 554 tests, 0 failures. New: `conversionIsDelayedByOneTick`,
+  `schedulingTheSamePlayerTwiceQueuesOneConversion`, `aDueConversionIsReleasedExactlyOnce`,
+  `schedulingWithoutAPlayerIsRefused`, `theCurseApplyPathSchedulesInsteadOfConvertingImmediately`,
+  `theServerTickDrivesPendingConversions`, `theDraconicNameCarriesNoStars`.
+- **Not verified:** no client was connected. No live player-versus-player kill was performed, so the
+  death message was not observed in game.
+
+## Kill rune effects wired into the kill pipeline — 2026-11-17
+
+- **Root cause.** `DragonMaceRuneEffects.onKill` had **zero callers**. `DragonMaceProgression.registerKill`
+  recorded the kill and returned the unlocked rune, but never invoked the effect, so all five Kill runes
+  were dead code and no kill ever produced a particle or sound. `grep -rn "onKill" src/main/java/`
+  returned only the declaration.
+- **Fix.** `registerKill` now calls `DragonMaceRuneEffects.onKill(killer, victim,
+  runes(server, killer.getUUID()).kill())` after `recordKill`, so the effect runs after the count is
+  persisted and uses the killer's saved Kill rune rather than a default. `onKill` already re-checks the
+  KILL toggle and requires a `ServerLevel`, so a disabled category still counts the kill but plays
+  nothing, and the effect stays server-side.
+- **Attribution unchanged.** `resolveKiller` still supplies the credited player, self-kills and
+  uncredited deaths still return early, and `beginDeath`/`endDeath` still claim the victim so one death
+  cannot double-count.
+- **Files:** `DragonMaceProgression.java`, `DragonMaceRuneEffectsTest.java`, `PROJECT_STATUS.md`.
+- **Automated:** 547 tests, 0 failures. `DragonMaceRuneEffectsTest` 19 tests, including
+  `theKillPipelineInvokesTheKillEffect` and `theKillEffectUsesTheKillersSelectedKillRune`. Both were
+  proven to fail with the call removed and pass with it restored.
+- **Not verified:** no client was connected. No live player-versus-player kill was performed, so the
+  particles and sound were never observed in game.
+
+## Rune row layout, apply slots and per-category toggles — 2026-11-17
+
+- **Rune row layout.** Rows 3–5 are now Kill (27), Aura (36) and Attack (45), each shaped
+  `empty | info | five runes | toggle | apply`: info at 28/37/46, runes at 29–33/38–42/47–51, toggle at
+  34/43/52 and apply at 35/44/53. The info icon is the second slot of the row, so it sits one index
+  before the first rune; the explicit slot numbers in the brief are authoritative and are what the tests
+  assert. Rows 0–2 are untouched.
+- **Apply slots.** The rightmost slot of each rune row applies that row's rune through
+  `DragonMaceEnchantmentMenu.applyRunes`, which stores only that one category and re-lores the holder's
+  maces immediately. It reads no configuration and stamps no timestamp, so the 120-second cooldown can
+  never block it; `canApplyRunes` gates on the unlock only.
+- **Toggles.** `DragonMaceRuneToggles` is a three-boolean record stored in
+  `DragonMaceProgressionData.Entry` under `toggles`, defaulting to all-on so an older save loads with
+  everything enabled. `DragonMaceProgression.toggleCategory` flips one category, saves, and refreshes the
+  holder's maces. The slot shows lime dye when enabled and gray dye when disabled, with the state in the
+  name and tooltip. Turning a category off never touches its selected rune.
+- **Effect gating.** `onKill`, `onAttack` and `tickAura` each return early when their own category is
+  disabled, so one switch cannot affect the other two. The mace lore appends ` (Disabled)` to a disabled
+  category's rune line.
+- **Soulflame.** No Fire Aspect anywhere: `grep -rn "FIRE_ASPECT"` over `src/` returns nothing, and
+  `DragonMaceEnchantments.configured` never emits it. Soulflame keeps its ignition
+  (`ignitesTarget` → 80 fire ticks) and applies no potion.
+- **Files:** `DragonMaceRuneToggles.java` (new), `DragonMaceEnchantmentLayout.java`,
+  `DragonMaceEnchantmentMenu.java`, `DragonMaceRuneEffects.java`, `DragonMaceProgression.java`,
+  `DragonMaceLoreContext.java`, `DragonMaceItems.java`, `world/DragonMaceProgressionData.java`,
+  `DragonMaceRuneGuiTest.java`, `DragonMaceRuneEffectsTest.java`, `PROJECT_STATUS.md`.
+- **Automated:** 543 tests, 0 failures. `DragonMaceRuneGuiTest` 35 tests, `DragonMaceRuneEffectsTest` 15.
+- **Not verified:** no client was connected. The rendered 54-slot grid, a live rune apply, a live toggle
+  click, and the disabled-effect gating in a running world were not exercised in game.
+
+## Rune system, kill progression and visual effects — 2026-11-17
+
+**Kill progression.** `DragonMaceProgressionData` is a `SavedData` in the overworld's
+`DimensionDataStorage`, written to `data/dragon_mace_progression.dat` and keyed by player UUID. It holds
+one record per player: a kill count and a three-field rune selection. Kill counts only ever increase, so
+an unlock is permanent. A record is created only when a player earns a kill or saves a selection.
+
+**Kill counting.** `ServerPlayerDeathMixin` registers the kill last, after the mace and curse transfers,
+so the killer's mace has already been converted and the kill that grants the curse also counts. The
+victim's UUID is claimed by `beginDeath` and released at `RETURN`, so a repeated death event in the same
+tick cannot double-count. A self-kill, an uncredited death and a kill made with anything other than a
+Draconic Mace are all ignored.
+
+**Runes.** Five runes — Draconic (light purple, 0 kills), Soulflame (blue, 1), Tempest (yellow, 2),
+Abyssal (dark purple, 3), Warden (aqua, 4) — in three independent categories: Kill, Attack and Aura. The
+same name and colour are used in the GUI, the lore and the unlock announcement. A rune that is not
+unlocked at the player's kill count is refused server-side on every click, and a stored selection is
+sanitised against the stored kill count on read, so a hand-edited save cannot grant an unearned rune.
+
+**Effects.** All server-side, all vanilla particles, nothing destructive.
+`DragonMaceRuneEffects.onKill` bursts the Kill rune's particle on the victim. `onAttack` fires from
+Fabric's `AttackEntityCallback` on the main hand only, re-checks the curse and the main hand, and applies
+the Attack rune: Soulflame ignites, Tempest knocks back, Abyssal applies Darkness, Warden applies
+Slowness. `tickAura` runs every ten ticks for the single curse holder and trails the Aura rune's particle
+around them, recomputed from live state so the aura stops the moment the curse or the last Draconic Mace
+is gone.
+
+**GUI.** The menu is now 54 slots — the existing 27-slot enchantment section is unchanged in rows 0–2,
+and rows 3–5 add one rune row per category at slots 27, 36 and 45. The client screen draws the vanilla
+`generic_54.png` at six rows. Confirm saves the enchantment configuration and the rune selection
+together, reconciles every online player's maces and starts the same 120-second global cooldown; Cancel
+discards both. Every slot stays display-only.
+
+**Lore.** The Draconic Mace lore is rebuilt from a `DragonMaceLoreContext` — live enchantment component,
+rune selection and kill count — so the enchantment summary, the three rune lines and the kill counter can
+never go stale. `refreshDraconicMace` rewrites them in place after a kill, after a confirmation and
+whenever the curse is applied.
+
+**Files:** `DragonMaceRune.java`, `DragonMaceRuneCategory.java`, `DragonMaceRuneSelection.java`,
+`DragonMaceLoreContext.java`, `DragonMaceProgression.java`, `DragonMaceRuneEffects.java`,
+`world/DragonMaceProgressionData.java` (all new); `DragonMaceItems.java`, `DragonMaceMaceConversion.java`,
+`DragonMaceEnchantmentLayout.java`, `DragonMaceEnchantmentMenu.java`,
+`client/DragonMaceEnchantmentScreen.java`, `DragonMaceAnnouncements.java`,
+`mixin/ServerPlayerDeathMixin.java`, `DragonMace.java`, `PROJECT_STATUS.md`; tests
+`DragonMaceRuneTest.java`, `DragonMaceProgressionTest.java`, `DragonMaceRuneGuiTest.java`,
+`DragonMaceRuneEffectsTest.java` (new) plus three existing files updated to the new lore and layout.
+
+**Automated:** 523 tests, 0 failures. New: 64 tests across the four new classes.
+
+**Not verified:** no client was connected. The rendered 54-slot GUI, a live kill incrementing the
+counter, an unlock announcement, the aura particles, an Attack rune firing on a real hit, and the
+`data/dragon_mace_progression.dat` file being written and reloaded were not exercised in game.
 
 ## Shift + F gated at the earliest point — 2026-11-17
 

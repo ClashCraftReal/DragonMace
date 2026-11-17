@@ -160,8 +160,8 @@ class DragonMaceItemsTest {
 
 		assertTrue(draconic.is(Items.MACE));
 		assertTrue(DragonMaceIdentity.isDraconicMace(draconic));
-		assertEquals("Draconic Mace \u272A\u272A\u272A\u272A\u272A\u278E", draconic.getHoverName().getString());
-		assertEquals(19, DragonMaceItems.draconicMaceLore().size());
+		assertEquals("Draconic Mace", draconic.getHoverName().getString());
+		assertEquals(23, DragonMaceItems.draconicMaceLore().size());
 	}
 
 	@Test

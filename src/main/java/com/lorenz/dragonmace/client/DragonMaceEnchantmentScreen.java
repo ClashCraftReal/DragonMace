@@ -25,8 +25,8 @@ public class DragonMaceEnchantmentScreen extends AbstractContainerScreen<DragonM
 	private static final Identifier CHEST_TEXTURE =
 			Identifier.withDefaultNamespace("textures/gui/container/generic_54.png");
 
-	/** Three chest rows: 17 pixels of border and title, 54 of slots, 7 of bottom border. */
-	private static final int PANEL_HEIGHT = 17 + 3 * 18 + 7;
+	/** Six chest rows: 17 pixels of border and title, 108 of slots, 7 of bottom border. */
+	private static final int PANEL_HEIGHT = 17 + 6 * 18 + 7;
 
 	public DragonMaceEnchantmentScreen(DragonMaceEnchantmentMenu menu, Inventory inventory,
 			Component title) {
@@ -52,7 +52,7 @@ public class DragonMaceEnchantmentScreen extends AbstractContainerScreen<DragonM
 
 		if (!this.menu.canApply()) {
 			graphics.drawString(this.font, "Cooldown: " + this.menu.cooldownSeconds() + "s",
-					this.leftPos + 8, this.topPos + this.imageHeight + 4, 0xA00000, false);
+					this.leftPos + 104, this.topPos + 6, 0xA00000, false);
 		}
 	}
 }
